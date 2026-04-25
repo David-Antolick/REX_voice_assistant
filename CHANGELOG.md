@@ -1,5 +1,28 @@
 # REX Voice Assistant - Changelog
 
+## [0.2.2] - 2026-04-25
+
+### Bug Fixes
+
+#### Spotify: popup on every command
+- Removed `show_dialog=True` from `SpotifyOAuth`, which was forcing the consent UI even when a valid token was already cached.
+- Added an explicit `cache_path` of `~/.rex/spotify_token.cache` so the OAuth token persists in a stable location regardless of the working directory `rex` is launched from.
+- Same fix applied to the setup wizard so the token cached during `rex setup` is found on subsequent runs.
+
+### UX Improvements
+
+#### Spotify setup wizard
+- Updated to match the current Spotify Developer portal flow: sign in at developer.spotify.com → click username (top right) → Dashboard → Create app.
+
+### Security & Hygiene
+- **Dependency pins**: every direct dep in `pyproject.toml` now has a major-version upper bound and a CVE-aware floor (e.g. `requests>=2.32.2,<3`, `aiohttp>=3.10.11,<4`, `pyyaml>=6.0.1,<7`).
+- **`requirements.txt` simplified** to `-e .` plus install instructions; `pyproject.toml` is the single source of truth.
+- **`pip-audit` added** to the `[dev]` extra and as a CI job — every push runs an audit against the resolved dep tree.
+- **Dependabot configured** for weekly grouped pip + GitHub Actions updates.
+- **`.venv*/` ignored** in `.gitignore`.
+
+---
+
 ## [0.2.0] - 2025-12-30
 
 ### New Features
