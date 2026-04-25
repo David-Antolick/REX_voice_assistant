@@ -91,13 +91,18 @@ def run_wizard():
     _setup_model()
     _step_complete()
 
-    # Step 8: Audio test (optional)
+    # Step 8: Wake word (optional)
+    wake_word_cfg = _setup_wake_word()
+    if wake_word_cfg:
+        _step_complete("Wake word configured!")
+
+    # Step 9: Audio test (optional)
     if Confirm.ask("\nWould you like to run a quick audio test?", default=False):
         _test_audio()
         _step_complete()
 
-    # Step 9: Write config (uses _selected_model for default)
-    _write_config(services, secrets)
+    # Step 10: Write config (uses _selected_model for default)
+    _write_config(services, secrets, cuda_ok=cuda_ok, wake_word=wake_word_cfg)
 
     console.print()
     console.print(Panel.fit(
@@ -706,15 +711,74 @@ def _test_audio():
         console.print(f"[red]Audio test failed: {e}[/red]")
 
 
-def _write_config(services: list[str], secrets: dict):
+def _setup_wake_word() -> dict:
+    """Optional wake-word setup. Installs the openwakeword extra, downloads models,
+    and returns a wake_word config dict (empty if user skips)."""
+    console.print("\n[bold]Step 8: Wake Word (optional)[/bold]\n")
+    console.print(
+        "REX can be gated behind a wake word so it only acts on commands\n"
+        "after hearing 'hey jarvis'. Recommended for always-on use.\n"
+    )
+
+    if not Confirm.ask("Enable the 'hey jarvis' wake word?", default=False):
+        console.print("[dim]Skipped wake-word setup.[/dim]")
+        return {}
+
+    # 1) Make sure openwakeword is installed.
+    try:
+        import openwakeword  # noqa: F401
+        console.print("[green]openwakeword already installed.[/green]")
+    except ImportError:
+        console.print("Installing openwakeword (~50MB) ...")
+        import subprocess
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "openwakeword>=0.6,<1"
+            ])
+            console.print("[green]openwakeword installed.[/green]")
+        except subprocess.CalledProcessError as exc:
+            console.print(f"[red]Install failed: {exc}[/red]")
+            console.print("You can retry later with: pip install rex-voice-assistant[wake_word]")
+            return {}
+
+    # 2) Pre-download the model files so first run is instant.
+    try:
+        from openwakeword.utils import download_models
+        console.print("Downloading wake-word models (~30MB) ...")
+        download_models()
+        console.print("[green]Models downloaded.[/green]")
+    except Exception as exc:
+        console.print(f"[yellow]Model download failed: {exc}. They will retry on first run.[/yellow]")
+
+    # 3) Tunables.
+    threshold = float(Prompt.ask(
+        "Detection threshold (0.0-1.0, higher = fewer false fires)",
+        default="0.5",
+    ))
+    cue = Confirm.ask("Play a short tone when the wake word fires?", default=True)
+
+    return {
+        "enabled": True,
+        "model": "hey_jarvis",
+        "threshold": threshold,
+        "listening_window_seconds": 6,
+        "debounce_seconds": 1.0,
+        "cue_enabled": cue,
+    }
+
+
+def _write_config(services: list[str], secrets: dict, *, cuda_ok: Optional[bool] = None, wake_word: Optional[dict] = None):
     """Write configuration to ~/.rex/config.yaml."""
     global _selected_model
 
-    console.print("\n[bold]Step 9: Saving Configuration[/bold]\n")
+    console.print("\n[bold]Step 10: Saving Configuration[/bold]\n")
 
     from rex_main.config import CONFIG_DIR, save_config, save_secrets, ensure_config_dir
 
     ensure_config_dir()
+
+    # Choose device default: cuda if GPU works, otherwise auto so REX can fall back.
+    device = "cuda" if cuda_ok else "auto"
 
     # Build config with selected model
     config = {
@@ -724,7 +788,7 @@ def _write_config(services: list[str], secrets: dict):
         },
         "model": {
             "name": _selected_model,
-            "device": "auto",
+            "device": device,
             "beam_size": 1,
             "cache_dir": str(CONFIG_DIR / "models"),
         },
@@ -743,6 +807,9 @@ def _write_config(services: list[str], secrets: dict):
             "file": str(CONFIG_DIR / "logs" / "rex.log"),
         },
     }
+
+    if wake_word:
+        config["wake_word"] = wake_word
 
     # Save config
     save_config(config)

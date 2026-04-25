@@ -1,11 +1,11 @@
 # Dependencies are defined in pyproject.toml.
 # Install the project (and any extras you need) with:
-#   pip install -e .                    # core only
-#   pip install -e .[cuda]              # + CUDA cuDNN
-#   pip install -e .[dashboard]         # + metrics dashboard
+#   pip install -e .                    # core (includes dashboard)
+#   pip install -e .[cuda]              # + CUDA cuDNN for GPU Whisper
+#   pip install -e .[wake_word]         # + openWakeWord for "hey jarvis" gating
 #   pip install -e .[benchmark]         # + perf instrumentation
 #   pip install -e .[integrations]      # + Discord/OBS/aiohttp
-#   pip install -e .[streamer]          # = dashboard + integrations + benchmark
+#   pip install -e .[streamer]          # = integrations + benchmark
 #   pip install -e .[dev]               # + pytest, black, ruff, pip-audit
 #
 # Pin upper bounds and CVE-aware floors live in pyproject.toml.

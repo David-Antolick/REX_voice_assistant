@@ -5,7 +5,7 @@ audio:
 
 model:
   name: "small.en"
-  device: "auto"
+  device: "cuda"
   beam_size: 1
   cache_dir: "~/.rex/models"
 

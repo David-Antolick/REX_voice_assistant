@@ -1,14 +1,34 @@
 # commands.py  – v2 (https://github.com/ytmdesktop/ytmdesktop/wiki/v2-%E2%80%90-Companion-Server-API-v1)
 from __future__ import annotations
+import functools
 import os
 import requests
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 from ytmusicapi import YTMusic
 from spotipy import Spotify
+from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 import logging
 logger = logging.getLogger(__name__)
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def safe_call(func: F) -> F:
+    """Swallow transient network / API errors so one bad call can't kill the assistant."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except SpotifyException as e:
+            logger.error("Spotify API error in %s: HTTP %s — %s", func.__name__, e.http_status, e.msg)
+        except requests.exceptions.RequestException as e:
+            logger.error("Network error in %s: %s", func.__name__, e)
+        except Exception as e:
+            logger.exception("Unexpected error in %s: %s", func.__name__, e)
+        return None
+    return wrapper  # type: ignore[return-value]
 
 '''Confusingly, YTMD app currently interfaces as the v2 api, but has v1 in the URL.'''
 
@@ -68,20 +88,17 @@ class YTMD:
             r.raise_for_status()
         except requests.exceptions.Timeout:
             logger.error("YTMD command %r timed out after %ss", command, self.timeout)
-            raise
         except requests.exceptions.HTTPError as e:
-            # e.response.status_code is available if you need it
             status = e.response.status_code if e.response else "??"
             logger.error("YTMD command %r failed: HTTP %s", command, status)
-            raise
         except requests.exceptions.RequestException as e:
             logger.error("YTMD command %r connection error: %s", command, e)
-            raise
         else:
             logger.debug("YTMD: %s (%s)", command, value)
 
 
 
+    @safe_call
     def search_song(self, title: str, artist: str | None = None) -> None:
         """
         Search YouTube Music (actual) for "title [+ artist]" and play the first match.
@@ -190,6 +207,7 @@ class SpotifyClient:
         logger.info("Using Spotify Connect device %r", self.device_id)
 
 
+    @safe_call
     def search_song(self, title: str, artist: str | None = None) -> None:
         """Search Spotify for a track and play the first match."""
         query = f"{title} {artist or ''}".strip()
@@ -203,22 +221,27 @@ class SpotifyClient:
 
 
     # music control
+    @safe_call
     def play_music(self):
         self.sp.start_playback(device_id=self.device_id)
         logger.info("Spotify: play")
 
+    @safe_call
     def stop_music(self):
         self.sp.pause_playback(device_id=self.device_id)
         logger.info("Spotify: pause")
 
+    @safe_call
     def next_track(self):
         self.sp.next_track(device_id=self.device_id)
         logger.info("Spotify: next")
 
+    @safe_call
     def previous_track(self):
         self.sp.previous_track(device_id=self.device_id)
         logger.info("Spotify: previous")
 
+    @safe_call
     def restart_track(self) -> None:
         """Seek to the start of the current track."""
         self.sp.seek_track(position_ms=0, device_id=self.device_id)
@@ -226,6 +249,7 @@ class SpotifyClient:
 
 
     # volume control
+    @safe_call
     def volume_up(self) -> None:
         """Increase volume by 10% (clamped at 100)."""
         current = self.sp.current_playback().get("device", {}).get("volume_percent", 50)
@@ -233,6 +257,7 @@ class SpotifyClient:
         self.sp.volume(new, device_id=self.device_id)
         logger.info("Spotify volume set to %d%%", new)
 
+    @safe_call
     def volume_down(self) -> None:
         """Decrease volume by 10% (floored at 0)."""
         current = self.sp.current_playback().get("device", {}).get("volume_percent", 50)
@@ -240,6 +265,7 @@ class SpotifyClient:
         self.sp.volume(new, device_id=self.device_id)
         logger.info("Spotify volume set to %d%%", new)
 
+    @safe_call
     def set_volume(self, level: int | str) -> None:
         """Set volume to an exact 0–100%."""
         try:
@@ -252,6 +278,7 @@ class SpotifyClient:
 
 
     # thumbs
+    @safe_call
     def like(self) -> None:
         """Save the current track to Your Library."""
         item = self.sp.current_user_playing_track().get("item")
@@ -261,6 +288,7 @@ class SpotifyClient:
         self.sp.current_user_saved_tracks_add([item["id"]])
         logger.info("Spotify liked %s", item["id"])
 
+    @safe_call
     def dislike(self) -> None:
         """Remove the current track from Your Library."""
         item = self.sp.current_user_playing_track().get("item")
@@ -272,14 +300,17 @@ class SpotifyClient:
 
 
     # Unique to Spotify
+    @safe_call
     def shuffle_on(self) -> None:
         self.sp.shuffle(True, device_id=self.device_id)
         logger.info("Spotify shuffle on")
 
+    @safe_call
     def shuffle_off(self) -> None:
         self.sp.shuffle(False, device_id=self.device_id)
         logger.info("Spotify shuffle off")
 
+    @safe_call
     def set_repeat(self, mode: str) -> None:
         """
         mode: one of "off", "context", or "track"
@@ -290,6 +321,7 @@ class SpotifyClient:
         self.sp.repeat(mode, device_id=self.device_id)
         logger.info("Spotify repeat set to %s", mode)
 
+    @safe_call
     def queue_track(self, query: str) -> None:
         # search for the track title
         results = (
@@ -307,6 +339,7 @@ class SpotifyClient:
         logger.info("Spotify queued %s", uri)
 
 
+    @safe_call
     def current_track_info(self) -> dict:
         """Return metadata about the current playing item."""
         info = self.sp.current_user_playing_track() or {}
@@ -315,6 +348,7 @@ class SpotifyClient:
 
 
     # Memes
+    @safe_call
     def so_sad(self) -> None:
         sad_uri = "spotify:track:6rPO02ozF3bM7NnOV4h6s2"
         self.sp.start_playback(device_id=self.device_id, uris=[sad_uri])

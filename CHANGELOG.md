@@ -1,5 +1,57 @@
 # REX Voice Assistant - Changelog
 
+## [0.3.0] - 2026-04-25
+
+### New Features
+
+#### Wake Word ("Hey Jarvis")
+- **Optional wake-word gate** via `openWakeWord` (prebuilt `hey_jarvis` model). When enabled, REX only acts on commands inside a 6-second listening window after detecting the wake phrase.
+- **Audio cue** (short two-tone "ding") plays on wake-word fire so you know REX is listening.
+- **Listening window auto-extends** on each successful command, so multi-turn flows ("hey jarvis" → "play music" → "volume up") work without re-waking.
+- **Suppressed-command logging**: commands matched outside the listening window are explicitly logged as `Suppressed early/final match '...' (wake word not active)` instead of misleading "Early match!" lines.
+- **Optional install** to keep the base footprint small: `pip install rex-voice-assistant[wake_word]`. Models auto-download (~30MB) on first run.
+- **CLI flag**: `--wake-word` / `--no-wake-word` (overrides config).
+- **Config knobs** (`~/.rex/config.yaml` → `wake_word:`): `enabled`, `model`, `threshold`, `listening_window_seconds`, `debounce_seconds`, `cue_enabled`.
+- **Custom "hey rex" model** training is on the roadmap for a future release.
+
+#### Gaming preset (`--gaming`)
+- One-flag shortcut for low-overhead operation: `tiny.en` model + CPU device + wake word + low-latency. Frees up GPU/VRAM for games while keeping REX responsive (tiny.en transcribes in ~80ms on CPU, well under the early-match deadline). Individual flags (`--model`, `--device`, etc.) still take precedence when passed alongside `--gaming`.
+
+#### Audio Pipeline Fan-Out
+- `AudioStream` now accepts optional `tap_queues` so multiple consumers (VAD + wake-word, future TTS interrupt detector, etc.) can each receive the same audio frames with independent backpressure.
+
+### Behavior Changes
+
+#### Dashboard ships in the base install
+- `fastapi`, `uvicorn`, and `websockets` moved from the `[dashboard]` optional extra into the core `dependencies` list. `rex --dashboard` and `rex dashboard` now work out of the box without any `pip install rex-voice-assistant[dashboard]` step. The misleading `Dashboard dependencies not installed` error path has been removed since it's unreachable.
+
+#### Low-latency mode is now the default
+- `--low-latency` was opt-in; now the default. Use `--standard` (or `low_latency_mode: false` in config) to opt back into the original 400ms-VAD pipeline.
+
+#### Volume commands no longer use early-match
+- `volume_up`, `volume_down`, and `set_volume` now wait for the full utterance before firing, so phrases like "volume 50" don't prematurely trigger on "volume" + a partial number. Joins existing entries (`search_song`, `queue_track`) in `NO_EARLY_MATCH_COMMANDS`.
+
+#### Match-rate metric is wake-aware
+- When wake-word gating is active, "Match Rate" is computed as `commands / wake_words` (did each wake produce a successful command?) instead of `matched / total_transcriptions`. The metrics summary line now also shows `Wake:` and `Suppressed:` counters.
+
+### Bug Fixes
+
+#### Click flag defaults shadowed user config
+- `--model`, `--device`, and `--beam` had hard-coded Click defaults (`small.en`, `auto`, `1`) that always evaluated truthy, so `ctx.obj.get(key) or config.get(...)` never reached the config branch. User-config values were silently ignored — most visible as `device: cuda` being set but the assistant still running on CPU. Defaults are now `None`, so the config wins unless the flag is explicitly passed.
+
+### Internal / Tooling
+
+- New module `rex_main/wake_word.py` with `ListeningState`, `WakeWordDetector`, and `play_wake_cue()` helper.
+- New metric event types `WAKE_WORD_DETECTED` and `COMMAND_SUPPRESSED`, plus `record_wake_word()` / `record_command_suppressed()` methods on the singleton collector.
+- `FastVAD` accepts an optional `gate_func` so it can suppress + log accurately without relying on the executor as the only enforcement point.
+- New optional dependency extra: `[wake_word]` → `openwakeword>=0.6,<1`.
+
+### Roadmap
+
+`ASSISTANT_ROADMAP.md` added — captures the longer-term plan to evolve REX from a music controller into a personal intelligence-layer dispatcher (regex fast-path + small local LM for unknown intents → built-in actions, system actions, or delegated agents like Claude Code).
+
+---
+
 ## [0.2.2] - 2026-04-25
 
 ### Bug Fixes

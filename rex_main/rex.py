@@ -140,6 +140,32 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
     if config:
         pulse_server = config.get("audio", {}).get("pulse_server")
 
+    # Wake-word configuration. CLI flag (opts.wake_word) overrides config.
+    wake_cfg = (config or {}).get("wake_word", {}) if config else {}
+    cli_wake = getattr(opts, "wake_word", None)
+    wake_enabled = cli_wake if cli_wake is not None else bool(wake_cfg.get("enabled", False))
+
+    from rex_main.wake_word import ListeningState, WakeWordDetector
+    listening_state = ListeningState(
+        gate_enabled=wake_enabled,
+        default_window_s=float(wake_cfg.get("listening_window_seconds", 6)),
+    )
+
+    wake_audio_q: Optional["asyncio.Queue[np.ndarray]"] = None
+    wake_detector: Optional[WakeWordDetector] = None
+    if wake_enabled:
+        wake_audio_q = asyncio.Queue(maxsize=50)
+        wake_detector = WakeWordDetector(
+            wake_audio_q,
+            listening_state,
+            model=wake_cfg.get("model", "hey_jarvis"),
+            threshold=float(wake_cfg.get("threshold", 0.5)),
+            debounce_seconds=float(wake_cfg.get("debounce_seconds", 1.0)),
+            cue_enabled=bool(wake_cfg.get("cue_enabled", True)),
+        )
+        logger.info("Wake-word gating enabled (model=%s, threshold=%.2f)",
+                    wake_detector.model_name, wake_detector.threshold)
+
     # Determine VAD mode based on low-latency setting
     low_latency = getattr(opts, 'low_latency', False)
 
@@ -149,7 +175,8 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
     benchmark.start_monitoring(interval_seconds=1.0)
     logger.info("Benchmark monitoring started (data saved to ~/.rex/benchmarks/)")
 
-    async with AudioStream(audio_q, pulse_server=pulse_server):
+    audio_taps = [wake_audio_q] if wake_audio_q is not None else []
+    async with AudioStream(audio_q, pulse_server=pulse_server, tap_queues=audio_taps):
         whisper = WhisperWorker(
             speech_q,
             text_q,
@@ -184,7 +211,17 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
                 return (False, None, (), True)
 
             def execute_command(func_name: str, args: tuple) -> None:
-                """Execute a matched command."""
+                """Execute a matched command, respecting the wake-word gate."""
+                if not listening_state.is_active():
+                    logger.debug("Command '%s' suppressed - wake word not active", func_name)
+                    try:
+                        from rex_main.metrics import metrics as _metrics
+                        _metrics.record_command_suppressed(func_name)
+                    except Exception:
+                        pass
+                    return
+                # Refresh window so multi-step interactions work without re-waking.
+                listening_state.activate()
                 func = getattr(commands, func_name, None)
                 if callable(func):
                     func(*args)
@@ -197,6 +234,7 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
                 silence_ms=250,
                 min_speech_ms=300,
                 early_check_interval_ms=200,
+                gate_func=listening_state.is_active,
             )
 
             tasks = [
@@ -210,9 +248,12 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
             tasks = [
                 asyncio.create_task(vad.run(), name="vad"),
                 asyncio.create_task(whisper.run(), name="whisper"),
-                asyncio.create_task(dispatch_command(text_q), name="matcher"),
+                asyncio.create_task(dispatch_command(text_q, listening_state=listening_state), name="matcher"),
                 asyncio.create_task(print_metrics_loop(30), name="metrics_printer"),
             ]
+
+        if wake_detector is not None:
+            tasks.append(asyncio.create_task(wake_detector.run(), name="wake_word"))
 
         # Handle Ctrl-C for graceful shutdown
         # Note: add_signal_handler doesn't work on Windows, but KeyboardInterrupt is caught

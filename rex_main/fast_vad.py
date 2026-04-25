@@ -76,11 +76,13 @@ class FastVAD:
         min_speech_ms: int = 300,
         early_check_interval_ms: int = 200,
         max_utterance_ms: int = 10_000,
+        gate_func: Optional[Callable[[], bool]] = None,
     ):
         self.in_q = in_queue
         self.transcribe = transcribe_func
         self.match = match_func
         self.execute = execute_func
+        self.gate_func = gate_func or (lambda: True)
 
         self.sr = sample_rate
         self.frame_ms = frame_ms
@@ -165,6 +167,15 @@ class FastVAD:
                             logger.debug("Skipping early match for '%s' (requires full utterance)", cmd_name)
                             continue
                         if matched and cmd_name:
+                            if not self.gate_func():
+                                logger.info("Suppressed early match '%s' from %r (wake word not active)", cmd_name, text)
+                                metrics.record_command_suppressed(cmd_name)
+                                # Drop the buffer so we don't keep retranscribing the same audio.
+                                speech_buf.clear()
+                                self._pre_buf.clear()
+                                silence_ctr = 0
+                                command_executed = True  # treat as handled to skip flush
+                                continue
                             logger.info("Early match! Command '%s' from: %r", cmd_name, text)
                             metrics.record_transcription(text, dt)
                             metrics.record_command_match(cmd_name, matched=True)
@@ -225,12 +236,16 @@ class FastVAD:
                                 matched, cmd_name, args, _ = self.match(text)
 
                                 if matched and cmd_name:
-                                    metrics.record_command_match(cmd_name, matched=True)
-                                    t1 = time.perf_counter()
-                                    self.execute(cmd_name, args)
-                                    exec_dt = (time.perf_counter() - t1) * 1000
-                                    metrics.record_command_execute(cmd_name, exec_dt)
-                                    benchmark.record_command(cmd_name, text, True, exec_dt, early_match=False)
+                                    if not self.gate_func():
+                                        logger.info("Suppressed final match '%s' from %r (wake word not active)", cmd_name, text)
+                                        metrics.record_command_suppressed(cmd_name)
+                                    else:
+                                        metrics.record_command_match(cmd_name, matched=True)
+                                        t1 = time.perf_counter()
+                                        self.execute(cmd_name, args)
+                                        exec_dt = (time.perf_counter() - t1) * 1000
+                                        metrics.record_command_execute(cmd_name, exec_dt)
+                                        benchmark.record_command(cmd_name, text, True, exec_dt, early_match=False)
                                 else:
                                     metrics.record_command_match(None, matched=False)
                                     benchmark.record_command("none", text, False, 0.0, early_match=False)

@@ -66,7 +66,11 @@ rex migrate --from-env  # Import settings from .env file
 --log-file      Path to log file
 --debug         Enable verbose logging
 --dashboard     Enable metrics dashboard at http://localhost:8080
---low-latency   Faster response time (250ms VAD timeout, may cut speech short)
+--low-latency   Low-latency mode (default, 250ms VAD timeout)
+--standard      Standard mode (400ms VAD timeout, more forgiving for slower speech)
+--wake-word     Require wake word ("hey jarvis") before commands fire
+--no-wake-word  Disable the wake-word gate (default)
+--gaming        Preset: tiny.en + CPU + wake word + low latency (frees the GPU)
 ```
 
 ---
@@ -136,6 +140,79 @@ REX integrates with [SteelSeries GG Moments](https://steelseries.com/gg) for han
    - Scroll down and check "REX Voice Assistant"
 
 **Voice triggers:** "clip that", "capture that", "record that", "save clip"
+
+---
+
+### Wake Word ("Hey Jarvis") — Optional
+
+REX can be gated behind a wake word so it only acts on commands within a short window after hearing "hey jarvis". When the gate is off (default), every recognized command fires immediately.
+
+**Setup:**
+
+```powershell
+# Install the optional wake-word dependency
+pip install rex-voice-assistant[wake_word]
+
+# Enable in config (~/.rex/config.yaml) or via CLI flag
+rex --wake-word
+```
+
+**Config knobs** (`~/.rex/config.yaml`):
+
+```yaml
+wake_word:
+  enabled: true                  # Master switch
+  model: "hey_jarvis"            # Prebuilt openWakeWord model
+  threshold: 0.5                 # 0.0-1.0; raise to reduce false fires
+  listening_window_seconds: 6    # Commands accepted for N seconds after wake
+  debounce_seconds: 1.0          # Min gap between consecutive fires
+  cue_enabled: true              # Play a short tone on wake
+```
+
+The listening window auto-extends each time a command fires, so multi-step interactions ("hey jarvis" → "play music" → "volume up") work without re-waking.
+
+This is currently a proof of concept using the prebuilt `hey_jarvis` model. Custom "hey rex" training is on the roadmap.
+
+---
+
+### Gaming Mode
+
+For gaming, REX has a one-flag preset that frees up the GPU and minimizes overhead while keeping you responsive:
+
+```powershell
+rex --gaming
+```
+
+This is equivalent to:
+
+```powershell
+rex --model tiny.en --device cpu --wake-word --low-latency
+```
+
+**Why these defaults:**
+
+| Setting | Why |
+|---------|-----|
+| `tiny.en` model | ~80 ms CPU transcription — fast enough for early-match to fire before the silence-flush deadline. small.en/medium.en on CPU run 300 ms–4 s, which causes early matches to be missed. |
+| `cpu` device | Frees ~2.5 GB VRAM and 100% of GPU compute for the game. |
+| `--wake-word` | Prevents in-game chat from triggering REX. |
+| `--low-latency` | 250 ms VAD silence cutoff (the default already, but pinned for clarity). |
+
+**Tradeoff:** tiny.en is less accurate than small.en. If you find it misrecognizing your commands, bump the model:
+
+```powershell
+rex --gaming --model base.en   # ~150 ms on CPU, more accurate
+```
+
+Individual flags always win over `--gaming`, so you can override any single piece.
+
+**Mode comparison:**
+
+| Mode | Model | Device | Wake | E2E latency | VRAM |
+|------|-------|--------|------|-------------|------|
+| Default | small.en | cuda (auto) | off | ~250 ms | ~2.5 GB |
+| `--gaming` | tiny.en | cpu | on | ~150 ms | 0 |
+| `--standard` | small.en | cuda | off | ~400 ms | ~2.5 GB |
 
 ---
 
@@ -210,7 +287,7 @@ python -m rex_main.rex --debug
 
 ### Roadmap
 
-- Dynamic hotword ("Hey Rex") with OpenWakeWord
+- Custom "Hey Rex" wake-word model (prebuilt "hey jarvis" already supported via `[wake_word]` extra)
 - Discord integration (waiting for RPC API access)
 - Application controls (open/close apps)
 - Performance optimizations

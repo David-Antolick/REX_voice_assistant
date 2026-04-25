@@ -33,13 +33,16 @@ class AudioStream:
     Parameters
     ----------
     queue : asyncio.Queue[np.ndarray]
-        Destination queue that will receive PCM blocks.
+        Primary destination queue that will receive PCM blocks.
     samplerate : int, default 16_000
         Target sampling rate (Hz). Make sure downstream models agree.
     frame_ms : int, default 32
         Duration of each frame in milliseconds. Must be consistent with VAD framework.
     device : int or str, optional
         Input device index or name. None uses system default.
+    tap_queues : list[asyncio.Queue], optional
+        Additional queues that receive a copy of each frame (fan-out). Each tap is
+        independent — slow consumers drop frames without affecting the primary queue.
     """
 
     def __init__(
@@ -49,6 +52,7 @@ class AudioStream:
         samplerate: int = 16_000,
         frame_ms: int = 32,
         device: Optional[int | str] = None,
+        tap_queues: Optional[list[asyncio.Queue]] = None,
         # Keep pulse_server for backwards compatibility but ignore it
         pulse_server: Optional[str] = None,
     ):
@@ -57,6 +61,7 @@ class AudioStream:
         self.frame_len = int(samplerate * frame_ms / 1000)
         self.frame_ms = frame_ms
         self.device = device
+        self.tap_queues = tap_queues or []
         self._stream: Optional[sd.InputStream] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -90,6 +95,11 @@ class AudioStream:
                 self.queue.put_nowait(data)
             except asyncio.QueueFull:
                 pass  # Silently drop frame - this happens during slow transcription
+            for tap in self.tap_queues:
+                try:
+                    tap.put_nowait(data)
+                except asyncio.QueueFull:
+                    pass  # Independent drop policy per tap
 
         self._loop.call_soon_threadsafe(lambda: _enqueue(audio))
 

@@ -25,15 +25,9 @@ _websocket_clients: Set = set()
 
 def _get_app():
     """Create and configure the FastAPI application."""
-    try:
-        from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-        from fastapi.responses import HTMLResponse, JSONResponse
-        from fastapi.staticfiles import StaticFiles
-    except ImportError:
-        raise ImportError(
-            "Dashboard dependencies not installed. "
-            "Install with: pip install rex-voice-assistant[dashboard]"
-        )
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
 
     from rex_main.metrics import metrics
 
@@ -161,13 +155,7 @@ def _get_app():
 
 def _run_server(host: str, port: int):
     """Run the uvicorn server in a thread."""
-    try:
-        import uvicorn
-    except ImportError:
-        raise ImportError(
-            "Dashboard dependencies not installed. "
-            "Install with: pip install rex-voice-assistant[dashboard]"
-        )
+    import uvicorn
 
     app = _get_app()
 
@@ -206,21 +194,8 @@ def start_dashboard(host: str = "127.0.0.1", port: int = 9876) -> bool:
 
     Returns:
         True if started successfully, False if already running or failed
-
-    Raises:
-        ImportError: If dashboard dependencies (fastapi, uvicorn) are not installed
     """
     global _server_thread
-
-    # Check dependencies before starting thread
-    try:
-        import uvicorn  # noqa: F401
-        import fastapi  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "Dashboard dependencies not installed. "
-            "Install with: pip install rex-voice-assistant[dashboard]"
-        )
 
     if _server_thread is not None and _server_thread.is_alive():
         logger.warning("Dashboard server already running")

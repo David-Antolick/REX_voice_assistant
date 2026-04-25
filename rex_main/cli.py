@@ -52,20 +52,35 @@ console = Console()
 
 
 @click.group(invoke_without_command=True)
-@click.option("--model", default="small.en", help="Whisper model size (tiny|base|small|medium|large)")
-@click.option("--device", default="auto", type=click.Choice(["cuda", "cpu", "auto"]), help="Device for inference (auto=detect GPU, fallback to CPU)")
-@click.option("--beam", default=1, type=int, help="Beam size for Whisper decoding")
+@click.option("--model", default=None, help="Whisper model size (tiny|base|small|medium|large) - overrides config")
+@click.option("--device", default=None, type=click.Choice(["cuda", "cpu", "auto"]), help="Device for inference (overrides config; auto=detect GPU, fallback to CPU)")
+@click.option("--beam", default=None, type=int, help="Beam size for Whisper decoding (overrides config)")
 @click.option("--log-file", default=None, help="Path to write rotating logs")
 @click.option("--debug", is_flag=True, help="Enable verbose logging")
 @click.option("--dashboard", is_flag=True, help="Enable metrics dashboard at http://localhost:9876")
 @click.option("--dashboard-port", default=9876, type=int, help="Port for metrics dashboard")
-@click.option("--low-latency", is_flag=True, help="Enable low-latency mode (faster response, may cut speech short)")
+@click.option("--low-latency/--standard", "low_latency", default=None, help="Low-latency mode (default) vs standard mode (slower, more forgiving VAD)")
+@click.option("--wake-word/--no-wake-word", "wake_word", default=None, help="Enable wake-word gating (overrides config)")
+@click.option("--gaming", is_flag=True, help="Gaming preset: tiny.en + CPU + wake word + low latency. Frees the GPU.")
 @click.pass_context
-def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Optional[str], debug: bool, dashboard: bool, dashboard_port: int, low_latency: bool):
+def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Optional[str], debug: bool, dashboard: bool, dashboard_port: int, low_latency: bool, wake_word: Optional[bool], gaming: bool):
     """REX - Voice-controlled music assistant.
 
     Run without a subcommand to start the voice assistant.
     """
+    if gaming:
+        # Gaming preset: lightweight + GPU-free. Individual flags still win
+        # if explicitly passed alongside --gaming.
+        if model is None:
+            model = "tiny.en"
+        if device is None:
+            device = "cpu"
+        if low_latency is None:
+            low_latency = True
+        if wake_word is None:
+            wake_word = True
+        console.print("[cyan]Gaming preset: tiny.en + CPU + wake word + low-latency[/cyan]")
+
     ctx.ensure_object(dict)
     ctx.obj["model"] = model
     ctx.obj["device"] = device
@@ -75,6 +90,7 @@ def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Option
     ctx.obj["dashboard"] = dashboard
     ctx.obj["dashboard_port"] = dashboard_port
     ctx.obj["low_latency"] = low_latency
+    ctx.obj["wake_word"] = wake_word
 
     # If no subcommand, run the assistant
     if ctx.invoked_subcommand is None:
@@ -101,7 +117,12 @@ def run(ctx: click.Context):
     opts.debug = ctx.obj.get("debug", False)
     opts.dashboard = ctx.obj.get("dashboard", False)
     opts.dashboard_port = ctx.obj.get("dashboard_port", 9876)
-    opts.low_latency = ctx.obj.get("low_latency", False)
+    cli_low_latency = ctx.obj.get("low_latency")
+    if cli_low_latency is None:
+        opts.low_latency = config.get("performance", {}).get("low_latency_mode", True)
+    else:
+        opts.low_latency = cli_low_latency
+    opts.wake_word = ctx.obj.get("wake_word")
 
     # Configure services from config
     from rex_main.commands import configure_from_config
@@ -109,14 +130,11 @@ def run(ctx: click.Context):
 
     # Start dashboard if enabled
     if opts.dashboard:
-        try:
-            from rex_main.dashboard import start_dashboard
-            if start_dashboard(port=opts.dashboard_port):
-                console.print(f"[green]Dashboard started at http://localhost:{opts.dashboard_port}[/green]")
-            else:
-                console.print("[yellow]Dashboard failed to start (may already be running)[/yellow]")
-        except ImportError:
-            console.print("[yellow]Dashboard dependencies not installed. Install with: pip install rex-voice-assistant[dashboard][/yellow]")
+        from rex_main.dashboard import start_dashboard
+        if start_dashboard(port=opts.dashboard_port):
+            console.print(f"[green]Dashboard started at http://localhost:{opts.dashboard_port}[/green]")
+        else:
+            console.print("[yellow]Dashboard failed to start (may already be running)[/yellow]")
 
     # Import and run main
     from rex_main.rex import run_assistant
@@ -255,13 +273,8 @@ def settings():
 @click.option("--port", default=9876, type=int, help="Port for dashboard server")
 def dashboard(port: int):
     """Run the metrics dashboard standalone (for viewing past sessions)."""
-    try:
-        from rex_main.dashboard import start_dashboard
-        import time
-    except ImportError:
-        console.print("[red]Dashboard dependencies not installed.[/red]")
-        console.print("Install with: pip install rex-voice-assistant[dashboard]")
-        return
+    from rex_main.dashboard import start_dashboard
+    import time
 
     console.print("[bold blue]REX Metrics Dashboard[/bold blue]")
     console.print(f"Starting dashboard at http://localhost:{port}")

@@ -25,10 +25,24 @@ async def print_metrics_loop(interval_seconds: int = 30):
             commands = metrics.get_command_frequency()
 
             # Only print if we have data
-            if stats['total_transcriptions'] > 0:
+            if stats['total_transcriptions'] > 0 or stats.get('total_wake_words', 0) > 0:
                 logger.info("=" * 50)
                 logger.info("METRICS SUMMARY")
-                logger.info(f"  Session: {stats['session_duration_s']:.0f}s | Commands: {stats['total_matched']} | Match Rate: {stats['match_rate_percent']:.0f}%")
+                basis = stats.get("match_rate_basis", "transcription")
+                if basis == "wake_word":
+                    logger.info(
+                        f"  Session: {stats['session_duration_s']:.0f}s | "
+                        f"Wake: {stats['total_wake_words']} | "
+                        f"Commands: {stats['total_matched']} | "
+                        f"Suppressed: {stats['total_suppressed']} | "
+                        f"Match Rate: {stats['match_rate_percent']:.0f}% (cmd/wake)"
+                    )
+                else:
+                    logger.info(
+                        f"  Session: {stats['session_duration_s']:.0f}s | "
+                        f"Commands: {stats['total_matched']} | "
+                        f"Match Rate: {stats['match_rate_percent']:.0f}%"
+                    )
                 logger.info(f"  Latency - E2E: {stats['avg_e2e_ms'] or 0:.0f}ms | Whisper: {stats['avg_whisper_ms'] or 0:.0f}ms | Execute: {stats['avg_execute_ms'] or 0:.0f}ms")
 
                 if commands:

@@ -19,11 +19,14 @@ import asyncio
 import logging
 import re
 import time
-from typing import Callable
+from typing import Callable, Optional, TYPE_CHECKING
 
 import rex_main.commands as commands
 import rex_main.steelseries as steelseries
 from rex_main.metrics import metrics
+
+if TYPE_CHECKING:
+    from rex_main.wake_word import ListeningState
 
 __all__ = ["dispatch_command", "COMMAND_PATTERNS", "NO_EARLY_MATCH_COMMANDS"]
 
@@ -34,6 +37,9 @@ logger = logging.getLogger(__name__)
 NO_EARLY_MATCH_COMMANDS: set[str] = {
     "search_song",      # "search X by Y" - would early-match on "search up" instead of "search upside down"
     "queue_track",      # "next track X" - same issue
+    "volume_up",        # "volume up" early-matches before "volume up to 50"-style numeric variants land
+    "volume_down",
+    "set_volume",       # "volume 50" - wait for full number to avoid "volume 5" firing early
 }
 
 
@@ -86,8 +92,15 @@ COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 
 # Public coroutine
-async def dispatch_command(text_queue: "asyncio.Queue[str]"):
-    """Forever task that reads recognised text and triggers handlers."""
+async def dispatch_command(
+    text_queue: "asyncio.Queue[str]",
+    listening_state: "Optional[ListeningState]" = None,
+):
+    """Forever task that reads recognised text and triggers handlers.
+
+    If `listening_state` is provided and its gate is enabled, commands are only
+    invoked when the listening window is active (post wake-word).
+    """
     logger.info("dispatch_command started - awaiting recognized text")
 
     while True:
@@ -99,6 +112,12 @@ async def dispatch_command(text_queue: "asyncio.Queue[str]"):
             m = pattern.match(text)
             if m:
                 matched = True
+                if listening_state is not None and not listening_state.is_active():
+                    logger.debug("Command '%s' suppressed - wake word not active", func_name)
+                    metrics.record_command_suppressed(func_name)
+                    break
+                if listening_state is not None:
+                    listening_state.activate()
                 logger.info("Matched command '%s'", func_name)
                 # Record match for metrics
                 metrics.record_command_match(func_name, matched=True)

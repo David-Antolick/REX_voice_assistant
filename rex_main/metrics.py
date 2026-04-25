@@ -39,6 +39,8 @@ class EventType(Enum):
     TRANSCRIPTION = "transcription"
     COMMAND_MATCH = "command_match"
     COMMAND_EXECUTE = "command_execute"
+    WAKE_WORD_DETECTED = "wake_word_detected"
+    COMMAND_SUPPRESSED = "command_suppressed"
 
 
 @dataclass
@@ -86,6 +88,8 @@ class MetricsCollector:
         self._total_transcriptions = 0
         self._total_matched = 0
         self._total_unmatched = 0
+        self._total_wake_words = 0
+        self._total_suppressed = 0
 
         # Per-command stats
         self._command_stats: Dict[str, CommandStats] = {}
@@ -172,6 +176,26 @@ class MetricsCollector:
                 "e2e_ms": None
             })
 
+    def record_wake_word(self, score: float, model: str = "") -> None:
+        """Record a wake-word detection event."""
+        with self._lock:
+            self._total_wake_words += 1
+            self._events.append(MetricEvent(
+                timestamp=time.time(),
+                event_type=EventType.WAKE_WORD_DETECTED,
+                metadata={"score": float(score), "model": model},
+            ))
+
+    def record_command_suppressed(self, command_name: str) -> None:
+        """Record a command that matched but was gated off (no active listening window)."""
+        with self._lock:
+            self._total_suppressed += 1
+            self._events.append(MetricEvent(
+                timestamp=time.time(),
+                event_type=EventType.COMMAND_SUPPRESSED,
+                metadata={"command": command_name},
+            ))
+
     def record_command_match(self, command_name: Optional[str], matched: bool) -> None:
         """Record whether a transcription matched a command.
 
@@ -240,17 +264,30 @@ class MetricsCollector:
             self._current_transcription_done = None
 
     def get_session_stats(self) -> Dict[str, Any]:
-        """Get aggregated statistics for the current session."""
+        """Get aggregated statistics for the current session.
+
+        When wake words have fired, match_rate is computed as
+        matched_commands / wake_words (i.e., "did each wake produce a command?").
+        Otherwise it falls back to matched / (matched + unmatched).
+        """
         with self._lock:
-            total = self._total_matched + self._total_unmatched
-            match_rate = (self._total_matched / total * 100) if total > 0 else 0.0
+            if self._total_wake_words > 0:
+                match_rate = self._total_matched / self._total_wake_words * 100
+                match_rate_basis = "wake_word"
+            else:
+                total = self._total_matched + self._total_unmatched
+                match_rate = (self._total_matched / total * 100) if total > 0 else 0.0
+                match_rate_basis = "transcription"
 
             return {
                 "session_duration_s": time.time() - self._session_start,
                 "total_transcriptions": self._total_transcriptions,
                 "total_matched": self._total_matched,
                 "total_unmatched": self._total_unmatched,
+                "total_wake_words": self._total_wake_words,
+                "total_suppressed": self._total_suppressed,
                 "match_rate_percent": round(match_rate, 1),
+                "match_rate_basis": match_rate_basis,
                 "avg_vad_ms": self._avg(self._vad_latencies),
                 "avg_whisper_ms": self._avg(self._whisper_latencies),
                 "avg_execute_ms": self._avg(self._execute_latencies),
@@ -334,6 +371,8 @@ class MetricsCollector:
             self._total_transcriptions = 0
             self._total_matched = 0
             self._total_unmatched = 0
+            self._total_wake_words = 0
+            self._total_suppressed = 0
             self._command_stats.clear()
             self._vad_latencies.clear()
             self._whisper_latencies.clear()
