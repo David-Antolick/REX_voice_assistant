@@ -55,6 +55,8 @@ rex status       # Show configuration and service connectivity
 rex test ytmd    # Test YouTube Music Desktop connection
 rex test spotify # Test Spotify connection
 rex dashboard    # Run metrics dashboard standalone
+rex record-wake-samples  # Record audio for training a custom wake word
+rex package-wake-samples # Bundle your recordings into a .zip to send to a trainer
 rex migrate --from-env  # Import settings from .env file
 ```
 
@@ -171,7 +173,25 @@ wake_word:
 
 The listening window auto-extends each time a command fires, so multi-step interactions ("hey jarvis" → "play music" → "volume up") work without re-waking.
 
-This is currently a proof of concept using the prebuilt `hey_jarvis` model. Custom "hey rex" training is on the roadmap.
+This is currently a proof of concept using the prebuilt `hey_jarvis` model.
+
+#### Custom wake word ("hey rex" or anything else)
+
+You can train a model on your own voice and any phrase you want. See [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) for the full walkthrough — record ~100 samples with `rex record-wake-samples`, run the openWakeWord training pipeline (~1 hour on a recent NVIDIA GPU), drop the resulting `.onnx` into `~/.rex/wake_models/`, and point your config at it:
+
+```yaml
+wake_word:
+  enabled: true
+  model: ~/.rex/wake_models/hey_rex.onnx
+```
+
+The setup wizard auto-discovers any `.onnx` files in `~/.rex/wake_models/` and offers to switch.
+
+**Multi-speaker training (recommended):** if you can recruit 3–5 people to each contribute ~100 recordings, the resulting model will generalize across voices much better than a single-speaker model. The contributor flow is non-coder-friendly:
+
+- Send your friends [CONTRIBUTING_VOICE_SAMPLES.md](CONTRIBUTING_VOICE_SAMPLES.md) — it walks them through installing REX, recording 100 samples, and packaging the result into a single `.zip` to send back.
+- They run `rex record-wake-samples` (which prompts for their name) and `rex package-wake-samples` (which produces a labeled zip).
+- You merge the zips into `~/.rex/wake_training/recordings/` and train. See [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) Phase 4 for the merge step.
 
 ---
 

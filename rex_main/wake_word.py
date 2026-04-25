@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Optional
 
@@ -122,15 +123,25 @@ class WakeWordDetector:
             self._disabled = True
             return
 
+        # Expand ~ so users can write `model: ~/.rex/wake_models/hey_rex.onnx`.
+        model_arg = os.path.expanduser(self.model_name)
+        is_custom = os.path.exists(model_arg)
+
         def _try_load() -> bool:
             try:
-                self._model = Model(wakeword_models=[self.model_name], inference_framework="onnx")
+                self._model = Model(wakeword_models=[model_arg], inference_framework="onnx")
                 return True
             except Exception as exc:
                 logger.warning("Wake-word model load attempt failed: %s", exc)
                 return False
 
         if not _try_load():
+            if is_custom:
+                # No point downloading prebuilt models; the user pointed at a missing file.
+                logger.error("Custom wake-word model not loadable: %s. Gate disabled.", model_arg)
+                self.listening_state._gate_enabled = False
+                self._disabled = True
+                return
             logger.info("Downloading openWakeWord models (one-time, ~30MB)...")
             try:
                 download_models()
@@ -145,7 +156,10 @@ class WakeWordDetector:
                 self._disabled = True
                 return
 
-        logger.info("WakeWord model loaded: %s (threshold=%.2f)", self.model_name, self.threshold)
+        if is_custom:
+            logger.info("Loaded custom wake-word model: %s (threshold=%.2f)", model_arg, self.threshold)
+        else:
+            logger.info("WakeWord model loaded: %s (threshold=%.2f)", self.model_name, self.threshold)
 
     def _predict(self, frame: np.ndarray) -> Optional[float]:
         """Run inference on one frame. Returns top score or None."""

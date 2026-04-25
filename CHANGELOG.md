@@ -14,6 +14,17 @@
 - **Config knobs** (`~/.rex/config.yaml` → `wake_word:`): `enabled`, `model`, `threshold`, `listening_window_seconds`, `debounce_seconds`, `cue_enabled`.
 - **Custom "hey rex" model** training is on the roadmap for a future release.
 
+#### Custom wake-word support
+- New CLI command **`rex record-wake-samples`** — guided recorder that captures ~100 clean 16 kHz mono WAVs (with peak/clipping validation, retry-on-bad, and a session notes file) ready to feed straight into the openWakeWord training pipeline.
+- **Custom `.onnx` models load by file path**: set `wake_word.model: ~/.rex/wake_models/hey_rex.onnx` in your config and REX will use it instead of the prebuilt `hey_jarvis`. Underlying `Model()` already supports paths; we just expand `~` and log a differentiated startup message.
+- **Setup wizard auto-discovery**: `rex setup` scans `~/.rex/wake_models/` and presents any custom `.onnx` files alongside `hey_jarvis`, defaulting to the most recently modified one.
+- New full walkthrough: [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) — covers recording, environment setup, synthetic-positive generation, mixing in user recordings, training on a single GPU (~1 hr on a 3070 Ti), validation, and threshold tuning. Targets the "Option B" approach (synthetic + your voice) for best per-user accuracy.
+- **Multi-speaker contribution flow** for training a single model across multiple voices:
+  - `rex record-wake-samples --contributor <name>` (or interactive prompt) namespaces recordings under `~/.rex/wake_training/recordings/<name>/` so multiple people's samples can be merged without filename clashes.
+  - New `rex package-wake-samples` command zips a contributor's WAVs plus a `manifest.json` (sample count, peak/RMS distribution, microphone, OS) for submission.
+  - New non-coder-friendly contribution guide [CONTRIBUTING_VOICE_SAMPLES.md](CONTRIBUTING_VOICE_SAMPLES.md) — walks a friend through installing REX via `pipx`, recording 100 samples, and producing a labeled `.zip` to send back, in plain English with no code knowledge assumed.
+  - [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) Phase 4 expanded with PowerShell merge scripts and per-contributor manifest spot-check guidance.
+
 #### Gaming preset (`--gaming`)
 - One-flag shortcut for low-overhead operation: `tiny.en` model + CPU device + wake word + low-latency. Frees up GPU/VRAM for games while keeping REX responsive (tiny.en transcribes in ~80ms on CPU, well under the early-match deadline). Individual flags (`--model`, `--device`, etc.) still take precedence when passed alongside `--gaming`.
 

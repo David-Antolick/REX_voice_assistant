@@ -160,6 +160,46 @@ def setup():
     run_wizard()
 
 
+@cli.command(name="record-wake-samples")
+@click.option("--count", default=100, type=int, help="Number of samples to record")
+@click.option("--phrase", default="hey rex", help="Wake-word phrase (used for prompts and filename prefix)")
+@click.option("--contributor", default=None, help="Your name (used to label your batch). Prompted if not given.")
+@click.option("--output-dir", default=None, type=click.Path(), help="Override save directory (default: ~/.rex/wake_training/recordings/<contributor>)")
+@click.option("--device", default=None, help="Audio input device (name or index)")
+def record_wake_samples_cmd(count: int, phrase: str, contributor: Optional[str], output_dir: Optional[str], device: Optional[str]):
+    """Record samples for training a custom wake-word model.
+
+    See TRAINING_HEY_REX.md for the full training walkthrough,
+    or CONTRIBUTING_VOICE_SAMPLES.md if you're contributing to someone else's model.
+    """
+    from rex_main.recorder import record_wake_samples
+    record_wake_samples(
+        count=count,
+        phrase=phrase,
+        output_dir=output_dir,
+        device=device,
+        contributor=contributor,
+    )
+
+
+@cli.command(name="package-wake-samples")
+@click.option("--contributor", default=None, help="Contributor folder to package (prompted if you have multiple)")
+@click.option("--phrase", default="hey rex", help="Phrase tag stored in the manifest")
+@click.option("--output", default=None, type=click.Path(), help="Override output zip path")
+def package_wake_samples_cmd(contributor: Optional[str], phrase: str, output: Optional[str]):
+    """Bundle your recordings into a single .zip to send to someone training a model.
+
+    The zip contains your WAVs plus a manifest.json (sample count, level stats,
+    microphone name, OS) so the trainer can verify quality before merging.
+    """
+    from rex_main.recorder import package_wake_samples
+    package_wake_samples(
+        contributor=contributor,
+        phrase=phrase,
+        output_zip=output,
+    )
+
+
 @cli.command()
 def settings():
     """Change REX settings (model, services, integrations)."""

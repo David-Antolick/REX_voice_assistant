@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
@@ -750,7 +751,43 @@ def _setup_wake_word() -> dict:
     except Exception as exc:
         console.print(f"[yellow]Model download failed: {exc}. They will retry on first run.[/yellow]")
 
-    # 3) Tunables.
+    # 3) Discover custom-trained models in ~/.rex/wake_models/ and let the user pick.
+    from rex_main.config import CONFIG_DIR
+    custom_dir = CONFIG_DIR / "wake_models"
+    custom_models = sorted(custom_dir.glob("*.onnx")) if custom_dir.exists() else []
+
+    if custom_models:
+        console.print("\n[bold]Found custom wake-word models:[/bold]")
+        console.print("  [cyan]0[/cyan]) hey_jarvis (prebuilt)")
+        for i, p in enumerate(custom_models, start=1):
+            console.print(f"  [cyan]{i}[/cyan]) {p.stem} (custom: {p})")
+        # Default to most recently modified custom model.
+        newest_idx = 1 + max(
+            range(len(custom_models)),
+            key=lambda j: custom_models[j].stat().st_mtime,
+        )
+        choice = int(Prompt.ask(
+            "Pick a model",
+            choices=[str(i) for i in range(0, len(custom_models) + 1)],
+            default=str(newest_idx),
+        ))
+        if choice == 0:
+            model_value = "hey_jarvis"
+        else:
+            # Store as ~ path so the config file stays portable across users.
+            chosen = custom_models[choice - 1]
+            try:
+                model_value = "~/" + str(chosen.relative_to(Path.home())).replace("\\", "/")
+            except ValueError:
+                model_value = str(chosen)
+    else:
+        model_value = "hey_jarvis"
+        console.print(
+            "\n[dim]Tip: see TRAINING_HEY_REX.md to train a custom 'hey rex' model. "
+            "Drop the resulting .onnx in ~/.rex/wake_models/ and re-run `rex setup` to switch.[/dim]"
+        )
+
+    # 4) Tunables.
     threshold = float(Prompt.ask(
         "Detection threshold (0.0-1.0, higher = fewer false fires)",
         default="0.5",
@@ -759,7 +796,7 @@ def _setup_wake_word() -> dict:
 
     return {
         "enabled": True,
-        "model": "hey_jarvis",
+        "model": model_value,
         "threshold": threshold,
         "listening_window_seconds": 6,
         "debounce_seconds": 1.0,
