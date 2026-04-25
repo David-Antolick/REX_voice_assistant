@@ -167,11 +167,14 @@ class SpotifyClient:
     )
 
     def __init__(self):
-        # this will pop open a browser on first run so you can log in
+        from pathlib import Path
+        cache_path = Path.home() / ".rex" / "spotify_token.cache"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
         auth = SpotifyOAuth(
             scope=self.SCOPE,
-            open_browser=True,        # opens host browser via redirect
-            show_dialog=True,         # force login every time until token cached
+            open_browser=True,
+            cache_path=str(cache_path),
         )
         self.sp = Spotify(auth_manager=auth)
 

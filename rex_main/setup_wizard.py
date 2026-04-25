@@ -467,22 +467,27 @@ def _setup_spotify() -> Optional[dict]:
     console.print()
     console.print("[bold cyan]Step-by-step setup:[/bold cyan]")
     console.print()
-    console.print("  [bold]1. Create a Developer Account:[/bold]")
-    console.print("     Go to: [link=https://developer.spotify.com/dashboard]https://developer.spotify.com/dashboard[/link]")
-    console.print("     Sign in with your Spotify account (free or Premium)")
+    console.print("  [bold]1. Sign in to Spotify Developer:[/bold]")
+    console.print("     Go to: [link=https://developer.spotify.com]https://developer.spotify.com[/link]")
+    console.print("     Click [bold]\"Log in\"[/bold] (top right) and sign in with your Spotify account (free or Premium)")
     console.print()
-    console.print("  [bold]2. Create a New App:[/bold]")
+    console.print("  [bold]2. Open the Dashboard:[/bold]")
+    console.print("     • After signing in, click your [bold]username[/bold] in the top-right corner")
+    console.print("     • Choose [bold]\"Dashboard\"[/bold] from the dropdown")
+    console.print("     • (Or go directly to: [link=https://developer.spotify.com/dashboard]https://developer.spotify.com/dashboard[/link])")
+    console.print()
+    console.print("  [bold]3. Create a New App:[/bold]")
     console.print("     • Click [bold]\"Create app\"[/bold]")
     console.print("     • App name: [cyan]REX Voice Assistant[/cyan] (or any name)")
     console.print("     • App description: [cyan]Voice control for Spotify[/cyan]")
     console.print("     • Website: can be left blank or use a placeholder")
     console.print()
-    console.print("  [bold]3. Configure Redirect URI:[/bold]")
-    console.print("     • In your app settings, find [bold]\"Redirect URIs\"[/bold]")
+    console.print("  [bold]4. Configure Redirect URI:[/bold]")
+    console.print("     • In the app settings, find [bold]\"Redirect URIs\"[/bold]")
     console.print("     • Add exactly: [bold green]http://127.0.0.1:8888/callback[/bold green]")
     console.print("     • Click [bold]\"Add\"[/bold] then [bold]\"Save\"[/bold]")
     console.print()
-    console.print("  [bold]4. Get Your Credentials:[/bold]")
+    console.print("  [bold]5. Get Your Credentials:[/bold]")
     console.print("     • Go to your app's [bold]\"Settings\"[/bold]")
     console.print("     • Copy the [bold]Client ID[/bold]")
     console.print("     • Click [bold]\"View client secret\"[/bold] and copy it")
@@ -512,9 +517,14 @@ def _setup_spotify() -> Optional[dict]:
         os.environ["SPOTIPY_CLIENT_SECRET"] = client_secret
         os.environ["SPOTIPY_REDIRECT_URI"] = "http://127.0.0.1:8888/callback"
 
+        from pathlib import Path as _P
+        cache_path = _P.home() / ".rex" / "spotify_token.cache"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
         sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
             scope="user-modify-playback-state user-read-playback-state user-library-modify user-library-read",
             open_browser=True,
+            cache_path=str(cache_path),
         ))
 
         # Test the connection
