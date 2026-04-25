@@ -19,6 +19,11 @@ secrets.yaml
 *.cache
 .pytest_cache/
 
+# Virtual envs
+.venv*/
+venv/
+env/
+
 # IDE
 .vscode/
 .idea/

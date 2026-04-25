@@ -1,21 +1,12 @@
-numpy
-scipy
-
-sounddevice
-soundfile
-pydub
-ffmpeg-python
-
-faster-whisper
-silero-vad
-torch
-torchaudio 
-
-pyyaml
-requests
-ytmusicapi
-spotipy
-
-#may god help you if this doesn't work
-nvidia-cudnn-cu12==9.5.1.17
-python-dotenv
+# Dependencies are defined in pyproject.toml.
+# Install the project (and any extras you need) with:
+#   pip install -e .                    # core only
+#   pip install -e .[cuda]              # + CUDA cuDNN
+#   pip install -e .[dashboard]         # + metrics dashboard
+#   pip install -e .[benchmark]         # + perf instrumentation
+#   pip install -e .[integrations]      # + Discord/OBS/aiohttp
+#   pip install -e .[streamer]          # = dashboard + integrations + benchmark
+#   pip install -e .[dev]               # + pytest, black, ruff, pip-audit
+#
+# Pin upper bounds and CVE-aware floors live in pyproject.toml.
+-e .

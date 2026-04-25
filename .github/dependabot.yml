@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "black"
+          - "ruff"
+          - "pip-audit"
+      dashboard:
+        patterns:
+          - "fastapi"
+          - "uvicorn*"
+          - "websockets"
+      ml-runtime:
+        patterns:
+          - "torch*"
+          - "faster-whisper"
+          - "silero-vad"
+          - "ctranslate2"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"

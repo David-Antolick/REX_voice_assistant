@@ -26,31 +26,45 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy>=1.24",
-    "scipy",
-    "sounddevice",
-    "soundfile",
-    "faster-whisper>=0.10",
-    "silero-vad",
-    "torch>=2.0",
-    "torchaudio",
-    "pyyaml",
-    "requests",
-    "ytmusicapi",
-    "spotipy",
-    "python-dotenv",
-    "click>=8.0",
-    "rich>=13.0",
-    "keyring",
+    "numpy>=1.24,<3",
+    "scipy>=1.11,<2",
+    "sounddevice>=0.5,<0.6",
+    "soundfile>=0.12,<0.14",
+    "faster-whisper>=1.0,<2",
+    "silero-vad>=5.0,<7",
+    "torch>=2.2,<3",
+    "torchaudio>=2.2,<3",
+    "pyyaml>=6.0.1,<7",
+    "requests>=2.32.2,<3",
+    "ytmusicapi>=1.7,<2",
+    "spotipy>=2.24,<3",
+    "python-dotenv>=1.0,<2",
+    "click>=8.1,<9",
+    "rich>=13.7,<16",
+    "keyring>=24.3,<26",
 ]
 
 [project.optional-dependencies]
 cuda = ["nvidia-cudnn-cu12==9.5.1.17"]
-dashboard = ["fastapi>=0.100", "uvicorn[standard]>=0.23", "websockets>=11.0"]
-benchmark = ["psutil>=5.9", "pynvml>=11.5"]
-integrations = ["pypresence>=4.3", "obsws-python>=1.6", "aiohttp>=3.8"]
+dashboard = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "websockets>=13.0,<17",
+]
+benchmark = ["psutil>=6.0,<8", "pynvml>=12.0,<14"]
+integrations = [
+    "pypresence>=4.3,<5",
+    "obsws-python>=1.6,<2",
+    "aiohttp>=3.10.11,<4",
+]
 streamer = ["rex-voice-assistant[dashboard,integrations,benchmark]"]
-dev = ["pytest", "pytest-asyncio", "black", "ruff"]
+dev = [
+    "pytest>=8.0,<10",
+    "pytest-asyncio>=0.23,<2",
+    "black>=24.3,<27",
+    "ruff>=0.6,<1.0",
+    "pip-audit>=2.7,<3",
+]
 
 [project.scripts]
 rex = "rex_main.cli:main"
