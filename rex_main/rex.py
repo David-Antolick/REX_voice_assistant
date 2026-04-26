@@ -140,10 +140,14 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
     if config:
         pulse_server = config.get("audio", {}).get("pulse_server")
 
-    # Wake-word configuration. CLI flag (opts.wake_word) overrides config.
+    # Wake-word configuration. CLI flags override config: --wake-word/--no-wake-word
+    # for the on/off gate, --wake-model for the model identifier (used by --gaming).
     wake_cfg = (config or {}).get("wake_word", {}) if config else {}
     cli_wake = getattr(opts, "wake_word", None)
     wake_enabled = cli_wake if cli_wake is not None else bool(wake_cfg.get("enabled", False))
+
+    cli_wake_model = getattr(opts, "wake_model", None)
+    wake_model_id = cli_wake_model or wake_cfg.get("model", "hey_rex")
 
     from rex_main.wake_word import ListeningState, WakeWordDetector
     listening_state = ListeningState(
@@ -158,7 +162,7 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
         wake_detector = WakeWordDetector(
             wake_audio_q,
             listening_state,
-            model=wake_cfg.get("model", "hey_jarvis"),
+            model=wake_model_id,
             threshold=float(wake_cfg.get("threshold", 0.5)),
             debounce_seconds=float(wake_cfg.get("debounce_seconds", 1.0)),
             cue_enabled=bool(wake_cfg.get("cue_enabled", True)),

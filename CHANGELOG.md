@@ -21,6 +21,10 @@ REX hits 1.0. Originally built as a music-control voice assistant, it now ships 
 #### `openwakeword` moved into base dependencies
 - Previously a `[wake_word]` optional extra; now bundled in the core install. Adds ~10 MB of transitive deps (mostly already present via faster-whisper). The `[wake_word]` extra still exists as a no-op alias for backward compatibility — `pip install rex-voice-assistant[wake_word]` continues to work.
 
+#### `--gaming` now forces hey_rex
+- The gaming preset (`rex --gaming`) explicitly forces `wake_model = "hey_rex"` regardless of what the user's `~/.rex/config.yaml` says. Ensures gaming-mode users always get the auto-downloaded REX-trained wake word, not a stale `hey_jarvis` carried over from an older config.
+- New `--wake-model` CLI flag exposes the model override generally — works alongside `--wake-word` to point at any model identifier (REX alias, openWakeWord prebuilt, or local file path).
+
 #### Setup wizard step simplified
 - Single prompt to enable/disable, then a numbered model picker. Default selection is the auto-downloading `hey_rex`; `hey_jarvis` is option 2; any custom `.onnx` files in `~/.rex/wake_models/` round out the list.
 - No more separate "install openwakeword?" or "download wake-word models?" prompts since both are bundled now.

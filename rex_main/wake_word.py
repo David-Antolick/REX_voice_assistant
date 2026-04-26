@@ -157,7 +157,7 @@ class WakeWordDetector:
         audio_q: "asyncio.Queue[np.ndarray]",
         listening_state: ListeningState,
         *,
-        model: str = "hey_jarvis",
+        model: str = "hey_rex",
         threshold: float = 0.5,
         debounce_seconds: float = 1.0,
         cue_enabled: bool = True,

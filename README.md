@@ -70,9 +70,10 @@ rex migrate --from-env  # Import settings from .env file
 --dashboard     Enable metrics dashboard at http://localhost:8080
 --low-latency   Low-latency mode (default, 250ms VAD timeout)
 --standard      Standard mode (400ms VAD timeout, more forgiving for slower speech)
---wake-word     Require wake word ("hey jarvis") before commands fire
---no-wake-word  Disable the wake-word gate (default)
---gaming        Preset: tiny.en + CPU + wake word + low latency (frees the GPU)
+--wake-word     Require wake word before commands fire (on by default)
+--no-wake-word  Disable the wake-word gate
+--wake-model    Wake-word model: 'hey_rex', 'hey_jarvis', or path to custom .onnx
+--gaming        Preset: tiny.en + CPU + hey_rex + low latency (frees the GPU)
 ```
 
 ---

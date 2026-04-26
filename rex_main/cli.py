@@ -61,9 +61,10 @@ console = Console()
 @click.option("--dashboard-port", default=9876, type=int, help="Port for metrics dashboard")
 @click.option("--low-latency/--standard", "low_latency", default=None, help="Low-latency mode (default) vs standard mode (slower, more forgiving VAD)")
 @click.option("--wake-word/--no-wake-word", "wake_word", default=None, help="Enable wake-word gating (overrides config)")
-@click.option("--gaming", is_flag=True, help="Gaming preset: tiny.en + CPU + wake word + low latency. Frees the GPU.")
+@click.option("--wake-model", default=None, help="Wake-word model name or path (e.g. 'hey_rex', 'hey_jarvis', or a local .onnx). Overrides config.")
+@click.option("--gaming", is_flag=True, help="Gaming preset: tiny.en + CPU + hey_rex wake word + low latency. Frees the GPU.")
 @click.pass_context
-def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Optional[str], debug: bool, dashboard: bool, dashboard_port: int, low_latency: bool, wake_word: Optional[bool], gaming: bool):
+def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Optional[str], debug: bool, dashboard: bool, dashboard_port: int, low_latency: bool, wake_word: Optional[bool], wake_model: Optional[str], gaming: bool):
     """REX - Voice-controlled music assistant.
 
     Run without a subcommand to start the voice assistant.
@@ -79,7 +80,11 @@ def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Option
             low_latency = True
         if wake_word is None:
             wake_word = True
-        console.print("[cyan]Gaming preset: tiny.en + CPU + wake word + low-latency[/cyan]")
+        if wake_model is None:
+            # Force the custom REX model regardless of what user config says.
+            # The auto-download path in wake_word.py grabs it from Hugging Face on first use.
+            wake_model = "hey_rex"
+        console.print("[cyan]Gaming preset: tiny.en + CPU + hey_rex wake word + low-latency[/cyan]")
 
     ctx.ensure_object(dict)
     ctx.obj["model"] = model
@@ -91,6 +96,7 @@ def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Option
     ctx.obj["dashboard_port"] = dashboard_port
     ctx.obj["low_latency"] = low_latency
     ctx.obj["wake_word"] = wake_word
+    ctx.obj["wake_model"] = wake_model
 
     # If no subcommand, run the assistant
     if ctx.invoked_subcommand is None:
@@ -123,6 +129,7 @@ def run(ctx: click.Context):
     else:
         opts.low_latency = cli_low_latency
     opts.wake_word = ctx.obj.get("wake_word")
+    opts.wake_model = ctx.obj.get("wake_model")
 
     # Configure services from config
     from rex_main.commands import configure_from_config
