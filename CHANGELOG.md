@@ -1,5 +1,9 @@
 # REX Voice Assistant - Changelog
 
+## [0.3.1] - 2026-04-25
+
+PyPI re-cut. The 0.3.0 version slot was registered before all of the planned 0.3.0 work landed in the wheel, so 0.3.1 is the first release on PyPI that contains the full feature set listed under 0.3.0 below.
+
 ## [0.3.0] - 2026-04-25
 
 ### New Features
