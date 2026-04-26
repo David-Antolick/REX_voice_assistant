@@ -1,6 +1,8 @@
 # REX Voice Assistant - Changelog
 
-## [0.3.2] - 2026-04-26
+## [1.0.0] - 2026-04-26
+
+REX hits 1.0. Originally built as a music-control voice assistant, it now ships a custom-trained wake word ("hey rex") auto-downloaded on first run, a guided pipeline for collecting voice samples from contributors, full dashboard, low-latency early-match transcription, and a gaming preset that frees the GPU. The core voice-assistant loop is feature-complete for the project's original scope.
 
 ### New Features
 
