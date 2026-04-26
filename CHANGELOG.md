@@ -1,5 +1,28 @@
 # REX Voice Assistant - Changelog
 
+## [0.3.2] - 2026-04-26
+
+### New Features
+
+#### Custom "Hey Rex" wake word is the default
+- A custom-trained `hey_rex` model is now the default wake word, **automatically downloaded** from [GetToasted/rex-wake-words](https://huggingface.co/GetToasted/rex-wake-words) on first run (~200 KB, cached at `~/.rex/wake_models/hey_rex.onnx`).
+- Trained on 2000 Piper TTS synthetic positives + 329 real recordings from 3 contributors (david, big_d, zach), with the openWakeWord automatic training pipeline. All contributors gave explicit consent for distribution including commercial use; model is MIT-licensed.
+- New `KNOWN_HF_MODELS` registry in [wake_word.py](rex_main/wake_word.py) — config values that match a registered alias auto-resolve via `huggingface_hub.hf_hub_download()`. File paths and openWakeWord prebuilt names (`hey_jarvis` etc.) still work as before.
+
+### Behavior Changes
+
+#### Wake-word gating is on by default
+- `wake_word.enabled` defaults to `true` in the package config. New users get the wake-word experience out of the box.
+- To disable: pass `--no-wake-word` on the CLI, or set `wake_word.enabled: false` in `~/.rex/config.yaml`.
+- Existing users with a `~/.rex/config.yaml` that was set up before this version are unchanged — their explicit `enabled: false` (or absence of the key) still wins via deep-merge.
+
+#### `openwakeword` moved into base dependencies
+- Previously a `[wake_word]` optional extra; now bundled in the core install. Adds ~10 MB of transitive deps (mostly already present via faster-whisper). The `[wake_word]` extra still exists as a no-op alias for backward compatibility — `pip install rex-voice-assistant[wake_word]` continues to work.
+
+#### Setup wizard step simplified
+- Single prompt to enable/disable, then a numbered model picker. Default selection is the auto-downloading `hey_rex`; `hey_jarvis` is option 2; any custom `.onnx` files in `~/.rex/wake_models/` round out the list.
+- No more separate "install openwakeword?" or "download wake-word models?" prompts since both are bundled now.
+
 ## [0.3.1] - 2026-04-25
 
 PyPI re-cut. The 0.3.0 version slot was registered before all of the planned 0.3.0 work landed in the wheel, so 0.3.1 is the first release on PyPI that contains the full feature set listed under 0.3.0 below.

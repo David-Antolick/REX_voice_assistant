@@ -18,13 +18,81 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ListeningState", "WakeWordDetector", "play_wake_cue"]
+__all__ = ["ListeningState", "WakeWordDetector", "play_wake_cue", "KNOWN_HF_MODELS"]
+
+
+# Registry of REX-curated wake-word models hosted on Hugging Face.
+# Users can refer to these by short name in their config; the file is
+# auto-downloaded on first use and cached at ~/.rex/wake_models/.
+KNOWN_HF_MODELS: dict[str, dict[str, str]] = {
+    "hey_rex": {
+        "repo_id": "GetToasted/rex-wake-words",
+        "filename": "hey_rex.onnx",
+    },
+}
+
+
+def _resolve_model_path(name_or_path: str) -> str:
+    """Resolve a wake-word model identifier to an actual file path or pass-through name.
+
+    Resolution order:
+    1. If `name_or_path` (after `~` expansion) points to an existing file, return it.
+    2. If it matches a key in KNOWN_HF_MODELS, download from Hugging Face on first
+       use and cache to ~/.rex/wake_models/. Subsequent runs use the cached file.
+    3. Otherwise return the expanded string and let openWakeWord's `Model()` try to
+       resolve it as one of its registered prebuilt names (hey_jarvis, alexa, etc.).
+    """
+    expanded = os.path.expanduser(name_or_path)
+    if os.path.exists(expanded):
+        return expanded
+
+    if name_or_path in KNOWN_HF_MODELS:
+        info = KNOWN_HF_MODELS[name_or_path]
+        cache_dir = Path.home() / ".rex" / "wake_models"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        local_path = cache_dir / info["filename"]
+
+        if local_path.exists():
+            return str(local_path)
+
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError:
+            logger.error(
+                "huggingface_hub not installed; cannot auto-download '%s'. "
+                "Falling back to openWakeWord prebuilt name resolution.",
+                name_or_path,
+            )
+            return expanded
+
+        logger.info(
+            "Downloading wake-word model '%s' from %s (one-time, ~200 KB)...",
+            name_or_path, info["repo_id"],
+        )
+        try:
+            downloaded = hf_hub_download(
+                repo_id=info["repo_id"],
+                filename=info["filename"],
+                local_dir=str(cache_dir),
+            )
+            logger.info("Cached at %s", downloaded)
+            return downloaded
+        except Exception as exc:
+            logger.error(
+                "Failed to download '%s' from %s: %s. "
+                "Falling back to prebuilt name resolution.",
+                name_or_path, info["repo_id"], exc,
+            )
+            return expanded
+
+    return expanded
 
 
 class ListeningState:
@@ -123,8 +191,11 @@ class WakeWordDetector:
             self._disabled = True
             return
 
-        # Expand ~ so users can write `model: ~/.rex/wake_models/hey_rex.onnx`.
-        model_arg = os.path.expanduser(self.model_name)
+        # Resolve the model identifier:
+        # - file path (with ~ expansion) → used as-is
+        # - REX-known alias like "hey_rex" → auto-download from HF and cache
+        # - openWakeWord prebuilt name like "hey_jarvis" → passed through unchanged
+        model_arg = _resolve_model_path(self.model_name)
         is_custom = os.path.exists(model_arg)
 
         def _try_load() -> bool:

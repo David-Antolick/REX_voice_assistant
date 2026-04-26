@@ -145,35 +145,23 @@ REX integrates with [SteelSeries GG Moments](https://steelseries.com/gg) for han
 
 ---
 
-### Wake Word ("Hey Jarvis") — Optional
+### Wake Word ("Hey Rex")
 
-REX can be gated behind a wake word so it only acts on commands within a short window after hearing "hey jarvis". When the gate is off (default), every recognized command fires immediately.
-
-**Setup:**
-
-```powershell
-# Install the optional wake-word dependency
-pip install rex-voice-assistant[wake_word]
-
-# Enable in config (~/.rex/config.yaml) or via CLI flag
-rex --wake-word
-```
+REX is gated behind a wake word by default — it only acts on commands within a short window after hearing "hey rex". The custom `hey_rex` model auto-downloads from [Hugging Face](https://huggingface.co/GetToasted/rex-wake-words) (~200 KB) on first run. To turn the gate off, use `--no-wake-word` or set `wake_word.enabled: false` in your config.
 
 **Config knobs** (`~/.rex/config.yaml`):
 
 ```yaml
 wake_word:
-  enabled: true                  # Master switch
-  model: "hey_jarvis"            # Prebuilt openWakeWord model
+  enabled: true                  # Master switch (default true)
+  model: "hey_rex"               # Default model. Also: "hey_jarvis" or a file path
   threshold: 0.5                 # 0.0-1.0; raise to reduce false fires
   listening_window_seconds: 6    # Commands accepted for N seconds after wake
   debounce_seconds: 1.0          # Min gap between consecutive fires
   cue_enabled: true              # Play a short tone on wake
 ```
 
-The listening window auto-extends each time a command fires, so multi-step interactions ("hey jarvis" → "play music" → "volume up") work without re-waking.
-
-This is currently a proof of concept using the prebuilt `hey_jarvis` model.
+The listening window auto-extends each time a command fires, so multi-step interactions ("hey rex" → "play music" → "volume up") work without re-waking.
 
 #### Custom wake word ("hey rex" or anything else)
 

@@ -713,81 +713,51 @@ def _test_audio():
 
 
 def _setup_wake_word() -> dict:
-    """Optional wake-word setup. Installs the openwakeword extra, downloads models,
-    and returns a wake_word config dict (empty if user skips)."""
-    console.print("\n[bold]Step 8: Wake Word (optional)[/bold]\n")
+    """Wake-word setup. The default model 'hey_rex' auto-downloads from Hugging Face
+    on first run. Users can pick a different model (or disable gating) here."""
+    from rex_main.config import CONFIG_DIR
+
+    console.print("\n[bold]Step 8: Wake Word[/bold]\n")
     console.print(
-        "REX can be gated behind a wake word so it only acts on commands\n"
-        "after hearing 'hey jarvis'. Recommended for always-on use.\n"
+        "REX uses a wake word so it only acts on commands after hearing it.\n"
+        "Default: [cyan]'hey rex'[/cyan] (auto-downloads on first run, ~200 KB).\n"
     )
 
-    if not Confirm.ask("Enable the 'hey jarvis' wake word?", default=False):
-        console.print("[dim]Skipped wake-word setup.[/dim]")
-        return {}
+    if not Confirm.ask("Enable wake-word gating?", default=True):
+        console.print("[dim]Wake-word gating disabled. Commands will fire without a wake word.[/dim]")
+        return {"enabled": False}
 
-    # 1) Make sure openwakeword is installed.
-    try:
-        import openwakeword  # noqa: F401
-        console.print("[green]openwakeword already installed.[/green]")
-    except ImportError:
-        console.print("Installing openwakeword (~50MB) ...")
-        import subprocess
-        try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", "openwakeword>=0.6,<1"
-            ])
-            console.print("[green]openwakeword installed.[/green]")
-        except subprocess.CalledProcessError as exc:
-            console.print(f"[red]Install failed: {exc}[/red]")
-            console.print("You can retry later with: pip install rex-voice-assistant[wake_word]")
-            return {}
-
-    # 2) Pre-download the model files so first run is instant.
-    try:
-        from openwakeword.utils import download_models
-        console.print("Downloading wake-word models (~30MB) ...")
-        download_models()
-        console.print("[green]Models downloaded.[/green]")
-    except Exception as exc:
-        console.print(f"[yellow]Model download failed: {exc}. They will retry on first run.[/yellow]")
-
-    # 3) Discover custom-trained models in ~/.rex/wake_models/ and let the user pick.
-    from rex_main.config import CONFIG_DIR
+    # Build the model menu: hey_rex (default) → hey_jarvis (prebuilt) → any custom .onnx files.
     custom_dir = CONFIG_DIR / "wake_models"
-    custom_models = sorted(custom_dir.glob("*.onnx")) if custom_dir.exists() else []
-
-    if custom_models:
-        console.print("\n[bold]Found custom wake-word models:[/bold]")
-        console.print("  [cyan]0[/cyan]) hey_jarvis (prebuilt)")
-        for i, p in enumerate(custom_models, start=1):
-            console.print(f"  [cyan]{i}[/cyan]) {p.stem} (custom: {p})")
-        # Default to most recently modified custom model.
-        newest_idx = 1 + max(
-            range(len(custom_models)),
-            key=lambda j: custom_models[j].stat().st_mtime,
-        )
-        choice = int(Prompt.ask(
-            "Pick a model",
-            choices=[str(i) for i in range(0, len(custom_models) + 1)],
-            default=str(newest_idx),
-        ))
-        if choice == 0:
-            model_value = "hey_jarvis"
-        else:
-            # Store as ~ path so the config file stays portable across users.
-            chosen = custom_models[choice - 1]
-            try:
-                model_value = "~/" + str(chosen.relative_to(Path.home())).replace("\\", "/")
-            except ValueError:
-                model_value = str(chosen)
-    else:
-        model_value = "hey_jarvis"
-        console.print(
-            "\n[dim]Tip: see TRAINING_HEY_REX.md to train a custom 'hey rex' model. "
-            "Drop the resulting .onnx in ~/.rex/wake_models/ and re-run `rex setup` to switch.[/dim]"
+    custom_models = []
+    if custom_dir.exists():
+        custom_models = sorted(
+            p for p in custom_dir.glob("*.onnx")
+            if p.name not in ("hey_rex.onnx",)  # already covered by alias entry
         )
 
-    # 4) Tunables.
+    options: list[tuple[str, str]] = [
+        ("hey_rex", "hey rex (default, auto-downloads from Hugging Face)"),
+        ("hey_jarvis", "hey jarvis (openWakeWord prebuilt)"),
+    ]
+    for p in custom_models:
+        try:
+            display_path = "~/" + str(p.relative_to(Path.home())).replace("\\", "/")
+        except ValueError:
+            display_path = str(p)
+        options.append((display_path, f"{p.stem} (custom: {display_path})"))
+
+    console.print("[bold]Pick a wake-word model:[/bold]")
+    for i, (_, desc) in enumerate(options, start=1):
+        console.print(f"  [cyan]{i}[/cyan]) {desc}")
+
+    choice = int(Prompt.ask(
+        "Select",
+        choices=[str(i) for i in range(1, len(options) + 1)],
+        default="1",
+    ))
+    model_value = options[choice - 1][0]
+
     threshold = float(Prompt.ask(
         "Detection threshold (0.0-1.0, higher = fewer false fires)",
         default="0.5",

@@ -93,15 +93,26 @@ git clone https://github.com/dscripka/openWakeWord.git oww-train
 cd oww-train
 ```
 
-### 2.2 Create an isolated venv
+### 2.2 Create an isolated venv with **Python 3.10**
+
+The openWakeWord training pipeline pins `tensorflow-cpu==2.8.1`, which has no wheels for Python 3.11+. It also depends on `tensorflow-addons` (archived in 2024) which only resolves on 3.10. Install Python 3.10 if you don't have it:
 
 ```powershell
-python -m venv .venv-train
+winget install Python.Python.3.10
+```
+
+(REX itself runs fine on 3.12; this 3.10 is just for the training venv.)
+
+Then create the venv with the `py` launcher to pin the version:
+
+```powershell
+py -3.10 -m venv .venv-train
 .\.venv-train\Scripts\Activate.ps1
+python --version    # confirm: Python 3.10.x
 python -m pip install --upgrade pip
 ```
 
-> **Make sure the prompt now shows `(.venv-train)`** before continuing. Every command in Phases 2–6 must run in this venv.
+> **Make sure the prompt now shows `(.venv-train)` and `python --version` reads 3.10.x** before continuing. Every command in Phases 2–6 must run in this venv.
 
 ### 2.3 Install training dependencies
 
@@ -349,15 +360,26 @@ Then say "hey rex" — you should hear the cue tone and `WakeWord fired: hey_rex
 
 ## 8. Troubleshooting
 
-### `piper-phonemize` install fails on Windows
+### `piper-phonemize` has no Windows wheel (real wall)
 
-Known Windows wheel issue. Workaround: use WSL2 for the training venv only (REX itself stays on native Windows). Or install from the prebuilt wheel:
+**This blocks native-Windows training.** piper-phonemize ships Linux and macOS wheels only — no PyPI Windows wheel, no Windows wheel in the GitHub releases. There is no quick `pip install <url>` fix.
 
+Two practical paths:
+
+**Easiest — Google Colab.** Open `notebooks/automatic_model_training.ipynb` directly from the dscripka/openWakeWord GitHub repo via Colab. Runtime → T4 GPU. Upload your recordings as a zip via the file panel, unzip in the notebook, copy WAVs into the synthetic-positives folder, run training. Slower than a 3070 Ti (~60 min vs ~30 min) but zero Windows-deps friction.
+
+**Best for power users — WSL2.** CUDA passthrough on Windows 11 means your 3070 Ti is fully usable from inside Linux:
 ```powershell
-pip install https://github.com/rhasspy/piper-phonemize/releases/download/v1.1.0/piper_phonemize-1.1.0-cp310-cp310-win_amd64.whl
+wsl --install -d Ubuntu-22.04
+# After reboot + Ubuntu setup:
 ```
-
-Match the cp310 to your Python version (cp311 / cp312).
+```bash
+sudo apt install -y python3.10-venv build-essential
+python3.10 -m venv .venv-train
+source .venv-train/bin/activate
+# Then all the openWakeWord pip commands work
+```
+Your recordings are at `/mnt/c/Users/<you>/.rex/wake_training/recordings/`. ~30 min one-time setup; subsequent training runs are full-speed local.
 
 ### `tensorflow-cpu` won't import
 

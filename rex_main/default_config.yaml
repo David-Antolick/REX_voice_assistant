@@ -22,8 +22,9 @@ performance:
   low_latency_mode: true   # Default on. Use --standard or set false for slower, more forgiving VAD timing.
 
 wake_word:
-  enabled: false                # Opt-in. Set true and `pip install rex-voice-assistant[wake_word]` to use.
-  model: "hey_jarvis"           # openWakeWord prebuilt model, or path like ~/.rex/wake_models/hey_rex.onnx
+  enabled: true                 # Default on. Use --no-wake-word or set false to disable.
+  model: "hey_rex"              # Custom REX model, auto-downloads from Hugging Face on first run.
+                                # Other options: "hey_jarvis" (openWakeWord prebuilt) or a file path.
   threshold: 0.5                # Detection confidence (0.0 - 1.0)
   listening_window_seconds: 6   # How long after a wake-word fire commands are accepted
   debounce_seconds: 1.0         # Minimum time between consecutive fires
