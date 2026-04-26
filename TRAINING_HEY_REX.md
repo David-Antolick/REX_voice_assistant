@@ -1,5 +1,7 @@
 # Training a Custom "Hey Rex" Wake-Word Model
 
+> **Have you done this before?** Skip to [TRAINING_RERUN.md](TRAINING_RERUN.md) for the field-tested recipe — every gotcha discovered during the first training run is captured there. ~1 hour vs. the ~9 hours this doc's first reader spent.
+
 **Audience:** REX users who want to replace the prebuilt `hey_jarvis` wake word with a custom-trained `hey rex` model fine-tuned on their own voice.
 **Hardware target:** NVIDIA GPU with ≥6 GB VRAM (this guide is written for an RTX 3070 Ti, 8 GB).
 **Time budget:** ~60–90 minutes end-to-end (recording + training).

@@ -166,7 +166,7 @@ The listening window auto-extends each time a command fires, so multi-step inter
 
 #### Custom wake word ("hey rex" or anything else)
 
-You can train a model on your own voice and any phrase you want. See [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) for the full walkthrough — record ~100 samples with `rex record-wake-samples`, run the openWakeWord training pipeline (~1 hour on a recent NVIDIA GPU), drop the resulting `.onnx` into `~/.rex/wake_models/`, and point your config at it:
+You can train a model on your own voice and any phrase you want. See [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) for the conceptual walkthrough, or [TRAINING_RERUN.md](TRAINING_RERUN.md) for the field-tested speed-run recipe (every gotcha pre-solved). Record ~100 samples with `rex record-wake-samples`, run the openWakeWord training pipeline (~1 hour on a recent NVIDIA GPU), drop the resulting `.onnx` into `~/.rex/wake_models/`, and point your config at it:
 
 ```yaml
 wake_word:
