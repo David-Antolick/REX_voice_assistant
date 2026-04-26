@@ -1,16 +1,16 @@
-scripts/*
-sounds/*
-stand_app/outputs/*
-models/*
-
-# Python
+# Python build artifacts
 *.pyc
 __pycache__/
 *.egg-info/
 dist/
 build/
 
-# Environment and secrets
+# Virtual envs
+.venv*/
+venv/
+env/
+
+# Environment & secrets
 *.env
 .env
 secrets.yaml
@@ -19,25 +19,21 @@ secrets.yaml
 *.cache
 .pytest_cache/
 
-# Virtual envs
-.venv*/
-venv/
-env/
-
-# IDE
+# IDE / editor
 .vscode/
 .idea/
 .claude/
 
-# Rex user data (not in repo)
-# ~/.rex/ is the user config directory
+# Local cached models (Whisper, etc.)
+models/
 
-# Personal / training artifacts (recording zips, ad-hoc scripts, notebooks)
+# Personal / training artifacts (recording zips, ad-hoc scripts, internal notebooks)
 _local/
 *.zip
 upload_to_hf.py
 
-#Internal Documents:
+# Internal planning / session-scratch docs (keep on disk for personal use)
+ASSISTANT_ROADMAP.md
 DEVELOPMENT.md
 SESSION_SUMMARY.md
 CLAUDE.md
