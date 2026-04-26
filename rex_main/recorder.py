@@ -50,15 +50,28 @@ def _record_one(device: Optional[str | int]) -> np.ndarray:
     return audio[:, 0]
 
 
-def _trim_silence(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
-    """Trim leading/trailing silence below threshold, keeping a small head/tail pad."""
+def _trim_for_save(
+    audio: np.ndarray,
+    sr: int = SAMPLE_RATE,
+    threshold: float = 0.005,
+    lead_pad_s: float = 0.15,
+    tail_pad_s: float = 0.40,
+) -> np.ndarray:
+    """Trim silence around detected speech with asymmetric padding.
+
+    Speech onsets are sharp ('h' in 'hey') and need only ~150 ms of context.
+    Trailing sibilants like the 'x' in 'rex' decay slowly and need generous
+    tail padding (~400 ms) to avoid being cut. Threshold of 0.005 catches
+    those quiet decays that the previous 0.01 missed.
+    """
     abs_audio = np.abs(audio)
     above = np.where(abs_audio > threshold)[0]
     if len(above) == 0:
-        return audio
-    pad = int(0.1 * SAMPLE_RATE)  # 100 ms pad
-    start = max(0, above[0] - pad)
-    end = min(len(audio), above[-1] + pad)
+        return audio  # no speech detected; keep the whole clip
+    lead_pad = int(lead_pad_s * sr)
+    tail_pad = int(tail_pad_s * sr)
+    start = max(0, above[0] - lead_pad)
+    end = min(len(audio), above[-1] + tail_pad)
     return audio[start:end]
 
 
@@ -165,7 +178,7 @@ def record_wake_samples(
 
             console.print("  [yellow]Recording...[/yellow]")
             audio = _record_one(device=device)
-            audio = _trim_silence(audio)
+            audio = _trim_for_save(audio)
 
             ok, reason, peak, rms = _level_check(audio)
             if not ok:
@@ -205,6 +218,261 @@ def record_wake_samples(
     ))
 
     return saved
+
+
+def review_wake_samples(
+    contributor: Optional[str] = None,
+    recordings_dir: Optional[Path] = None,
+    start_at: int = 1,
+) -> tuple[int, int]:
+    """Walk a contributor's recordings interactively, keep or reject each.
+
+    Rejected files move to ``<contributor>/_rejected/`` so they can be restored.
+    Returns (kept, rejected).
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+
+    console = Console()
+
+    if recordings_dir is None:
+        recordings_dir = CONFIG_DIR / "wake_training" / "recordings"
+    recordings_dir = Path(recordings_dir).expanduser()
+
+    if not recordings_dir.exists():
+        console.print(f"[red]No recordings folder at {recordings_dir}.[/red]")
+        return 0, 0
+
+    candidates = [p for p in recordings_dir.iterdir() if p.is_dir() and p.name != "_rejected"]
+    if not candidates:
+        candidates = [recordings_dir]
+
+    if contributor is None and len(candidates) > 1:
+        console.print("\n[bold]Pick a contributor folder to review:[/bold]")
+        for i, p in enumerate(candidates, start=1):
+            wav_count = len(list(p.glob("*.wav")))
+            console.print(f"  [cyan]{i}[/cyan]) {p.name} ({wav_count} samples)")
+        choice = int(Prompt.ask("Select", choices=[str(i) for i in range(1, len(candidates) + 1)], default="1"))
+        folder = candidates[choice - 1]
+    elif contributor is not None:
+        slug = _safe_contributor(contributor)
+        folder = recordings_dir / slug
+        if not folder.exists():
+            console.print(f"[red]No folder for contributor '{contributor}'.[/red]")
+            return 0, 0
+    else:
+        folder = candidates[0]
+
+    wavs = sorted(folder.glob("*.wav"))
+    if not wavs:
+        console.print(f"[red]No .wav files in {folder}.[/red]")
+        return 0, 0
+
+    rejected_dir = folder / "_rejected"
+    rejected_dir.mkdir(exist_ok=True)
+
+    console.print(Panel.fit(
+        f"[bold blue]Review session[/bold blue]\n\n"
+        f"Folder: [cyan]{folder}[/cyan]\n"
+        f"Total samples: [cyan]{len(wavs)}[/cyan]\n"
+        f"Starting at: [cyan]#{start_at}[/cyan]\n\n"
+        f"For each clip:\n"
+        f"  [cyan]k[/cyan]eep   - leave it in place (default)\n"
+        f"  [cyan]r[/cyan]eject - move to _rejected/ (recoverable)\n"
+        f"  [cyan]p[/cyan]lay   - replay the clip\n"
+        f"  [cyan]q[/cyan]uit   - stop reviewing\n\n"
+        f"[dim]Rejected files can be restored later with:\n"
+        f"  Move-Item _rejected/<file>.wav ..[/dim]",
+        border_style="blue",
+    ))
+
+    kept = 0
+    rejected = 0
+
+    try:
+        for idx, wav in enumerate(wavs, start=1):
+            if idx < start_at:
+                continue
+            console.print(f"\n[bold][ {idx} / {len(wavs)} ][/bold]  {wav.name}")
+            data, sr = sf.read(str(wav), dtype="float32")
+            peak = float(np.max(np.abs(data))) if len(data) else 0.0
+            rms = float(np.sqrt(np.mean(data**2))) if len(data) else 0.0
+            console.print(f"  duration={len(data) / sr:.2f}s  peak={peak:.2f}  rms={rms:.3f}")
+
+            sd.play(data, samplerate=sr)
+            sd.wait()
+
+            while True:
+                choice = Prompt.ask("  [k]eep / [r]eject / [p]lay again / [q]uit", default="k").strip().lower()
+                if choice in ("k", ""):
+                    kept += 1
+                    break
+                if choice == "r":
+                    target = rejected_dir / wav.name
+                    wav.replace(target)
+                    rejected += 1
+                    console.print(f"  [yellow]rejected[/yellow] -> {target.name}")
+                    break
+                if choice == "p":
+                    sd.play(data, samplerate=sr)
+                    sd.wait()
+                    continue
+                if choice == "q":
+                    raise KeyboardInterrupt
+                console.print("  [dim]not recognized, try k/r/p/q[/dim]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped early.[/yellow]")
+
+    console.print(Panel.fit(
+        f"[bold green]Review complete[/bold green]\n\n"
+        f"Kept: [cyan]{kept}[/cyan]   Rejected: [cyan]{rejected}[/cyan]\n"
+        f"Rejected files: [cyan]{rejected_dir}[/cyan]\n\n"
+        f"To re-record empty slots, run [cyan]rex record-wake-samples[/cyan] again.\n"
+        f"Auto-numbering picks up the gaps.",
+        border_style="green",
+    ))
+
+    return kept, rejected
+
+
+def retrim_wake_samples(
+    contributor: Optional[str] = None,
+    recordings_dir: Optional[Path] = None,
+    dry_run: bool = False,
+) -> tuple[int, float]:
+    """Re-trim existing recordings using the asymmetric trim policy.
+
+    Originals are backed up to ``<contributor>/_untrimmed/`` before overwriting,
+    so the operation is reversible. Returns (files_changed, total_seconds_saved).
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.prompt import Prompt
+    from rich.table import Table
+
+    console = Console()
+
+    if recordings_dir is None:
+        recordings_dir = CONFIG_DIR / "wake_training" / "recordings"
+    recordings_dir = Path(recordings_dir).expanduser()
+
+    if not recordings_dir.exists():
+        console.print(f"[red]No recordings folder at {recordings_dir}.[/red]")
+        return 0, 0.0
+
+    candidates = [p for p in recordings_dir.iterdir() if p.is_dir() and p.name not in ("_rejected", "_untrimmed")]
+    if not candidates:
+        candidates = [recordings_dir]
+
+    if contributor is None and len(candidates) > 1:
+        console.print("\n[bold]Pick a contributor folder to retrim:[/bold]")
+        for i, p in enumerate(candidates, start=1):
+            wav_count = len(list(p.glob("*.wav")))
+            console.print(f"  [cyan]{i}[/cyan]) {p.name} ({wav_count} samples)")
+        choice = int(Prompt.ask("Select", choices=[str(i) for i in range(1, len(candidates) + 1)], default="1"))
+        folder = candidates[choice - 1]
+    elif contributor is not None:
+        slug = _safe_contributor(contributor)
+        folder = recordings_dir / slug
+        if not folder.exists():
+            console.print(f"[red]No folder for contributor '{contributor}'.[/red]")
+            return 0, 0.0
+    else:
+        folder = candidates[0]
+
+    wavs = sorted(folder.glob("*.wav"))
+    if not wavs:
+        console.print(f"[red]No .wav files in {folder}.[/red]")
+        return 0, 0.0
+
+    backup_dir = folder / "_untrimmed"
+
+    # First pass: scan and report.
+    rows: list[tuple[str, float, float, float]] = []  # name, old_dur, new_dur, peak
+    durations_old: list[float] = []
+    durations_new: list[float] = []
+
+    for wav in wavs:
+        data, sr = sf.read(str(wav), dtype="float32")
+        if data.ndim > 1:
+            data = data[:, 0]
+        old_dur = len(data) / sr
+        trimmed = _trim_for_save(data, sr=sr)
+        new_dur = len(trimmed) / sr
+        peak = float(np.max(np.abs(data))) if len(data) else 0.0
+        rows.append((wav.name, old_dur, new_dur, peak))
+        durations_old.append(old_dur)
+        durations_new.append(new_dur)
+
+    saved = sum(o - n for _, o, n, _ in rows)
+
+    table = Table(title=f"Retrim preview — {folder.name}")
+    table.add_column("Stat", style="cyan")
+    table.add_column("Before")
+    table.add_column("After")
+    table.add_row("count", str(len(wavs)), str(len(wavs)))
+    table.add_row("mean dur", f"{np.mean(durations_old):.2f}s", f"{np.mean(durations_new):.2f}s")
+    table.add_row("median dur", f"{np.median(durations_old):.2f}s", f"{np.median(durations_new):.2f}s")
+    table.add_row("min dur", f"{np.min(durations_old):.2f}s", f"{np.min(durations_new):.2f}s")
+    table.add_row("max dur", f"{np.max(durations_old):.2f}s", f"{np.max(durations_new):.2f}s")
+    table.add_row("std dur", f"{np.std(durations_old):.2f}s", f"{np.std(durations_new):.2f}s")
+    table.add_row("total dur", f"{sum(durations_old):.1f}s", f"{sum(durations_new):.1f}s")
+    console.print(table)
+
+    # Show outliers — clips that didn't shrink (probably the cut-off ones, where
+    # there's no trailing silence to trim) and clips that shrunk to suspiciously
+    # short lengths (might be weird).
+    no_change = [r for r in rows if r[1] - r[2] < 0.05]
+    very_short = [r for r in rows if r[2] < 0.6]
+    if no_change:
+        console.print(f"\n[yellow]{len(no_change)} clips barely changed[/yellow] — likely cut-off recordings (no trailing silence). Worth reviewing with `rex review-wake-samples`.")
+    if very_short:
+        console.print(f"[yellow]{len(very_short)} clips trimmed to <0.6s[/yellow] — possibly very fast utterances or noisy fragments. Worth reviewing.")
+
+    if dry_run:
+        console.print("\n[dim]--dry-run set; no files modified. Re-run without --dry-run to apply.[/dim]")
+        return 0, saved
+
+    if not Prompt.ask(
+        f"\nApply retrim to {len(wavs)} files (originals backed up to _untrimmed/)?",
+        choices=["y", "n"],
+        default="y",
+    ).lower().startswith("y"):
+        console.print("[yellow]Cancelled.[/yellow]")
+        return 0, 0.0
+
+    backup_dir.mkdir(exist_ok=True)
+    changed = 0
+    for wav in wavs:
+        data, sr = sf.read(str(wav), dtype="float32")
+        if data.ndim > 1:
+            data = data[:, 0]
+        trimmed = _trim_for_save(data, sr=sr)
+        if abs(len(trimmed) - len(data)) < int(0.05 * sr):
+            continue  # < 50 ms diff, not worth the I/O
+        # Backup original
+        backup_path = backup_dir / wav.name
+        if not backup_path.exists():
+            wav.replace(backup_path)
+        else:
+            # Backup already exists from a prior retrim; just delete the current.
+            wav.unlink()
+        # Save trimmed in original location
+        _save_wav(wav, trimmed)
+        changed += 1
+
+    console.print(Panel.fit(
+        f"[bold green]Retrim complete[/bold green]\n\n"
+        f"Files updated: [cyan]{changed}[/cyan] / {len(wavs)}\n"
+        f"Time saved: [cyan]{saved:.1f}s[/cyan] across the batch\n"
+        f"Backups: [cyan]{backup_dir}[/cyan]\n\n"
+        f"[dim]To restore an original:\n"
+        f"  Move-Item {backup_dir}\\<file>.wav {folder}\\<file>.wav -Force[/dim]",
+        border_style="green",
+    ))
+
+    return changed, saved
 
 
 def _detect_microphone_name() -> str:

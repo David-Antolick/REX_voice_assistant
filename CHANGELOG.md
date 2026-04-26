@@ -24,6 +24,10 @@
   - New `rex package-wake-samples` command zips a contributor's WAVs plus a `manifest.json` (sample count, peak/RMS distribution, microphone, OS) for submission.
   - New non-coder-friendly contribution guide [CONTRIBUTING_VOICE_SAMPLES.md](CONTRIBUTING_VOICE_SAMPLES.md) — walks a friend through installing REX via `pipx`, recording 100 samples, and producing a labeled `.zip` to send back, in plain English with no code knowledge assumed.
   - [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) Phase 4 expanded with PowerShell merge scripts and per-contributor manifest spot-check guidance.
+- **Quality-control commands for recordings**:
+  - `rex review-wake-samples` — interactive playback with keep / reject / replay / quit. Rejected files move to `_rejected/` (recoverable, not deleted).
+  - `rex retrim-wake-samples` — re-trims existing recordings with the asymmetric trim policy (lower 0.005 threshold, 150 ms lead pad, 400 ms tail pad). Originals back up to `_untrimmed/` so the operation is reversible. Includes a `--dry-run` mode that reports duration distribution and flags suspect clips ("barely changed" likely means cut-off; "<0.6 s" likely means fast utterance or fragment).
+  - **Trim-policy fix on the recorder itself**: the previous symmetric 100 ms / 0.01-threshold trim was clipping the trailing 'x' sibilant in "hey rex" because its decay falls below 0.01. New recordings now use the same asymmetric trim as the retrim command.
 
 #### Gaming preset (`--gaming`)
 - One-flag shortcut for low-overhead operation: `tiny.en` model + CPU device + wake word + low-latency. Frees up GPU/VRAM for games while keeping REX responsive (tiny.en transcribes in ~80ms on CPU, well under the early-match deadline). Individual flags (`--model`, `--device`, etc.) still take precedence when passed alongside `--gaming`.

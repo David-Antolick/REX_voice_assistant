@@ -182,6 +182,32 @@ def record_wake_samples_cmd(count: int, phrase: str, contributor: Optional[str],
     )
 
 
+@cli.command(name="retrim-wake-samples")
+@click.option("--contributor", default=None, help="Contributor folder to retrim (prompted if multiple)")
+@click.option("--dry-run", is_flag=True, help="Just report stats; don't modify any files")
+def retrim_wake_samples_cmd(contributor: Optional[str], dry_run: bool):
+    """Re-trim existing recordings using the asymmetric trim policy.
+
+    Useful for cleaning up samples recorded before the trim was tuned. Originals
+    are backed up to `_untrimmed/` so the operation is reversible.
+    """
+    from rex_main.recorder import retrim_wake_samples
+    retrim_wake_samples(contributor=contributor, dry_run=dry_run)
+
+
+@cli.command(name="review-wake-samples")
+@click.option("--contributor", default=None, help="Contributor folder to review (prompted if you have multiple)")
+@click.option("--start-at", default=1, type=int, help="Sample number to start from (resume from where you left off)")
+def review_wake_samples_cmd(contributor: Optional[str], start_at: int):
+    """Listen to recorded samples and keep or reject each.
+
+    Rejected files move to a `_rejected/` subfolder (recoverable). Re-run
+    `rex record-wake-samples` to fill the gaps.
+    """
+    from rex_main.recorder import review_wake_samples
+    review_wake_samples(contributor=contributor, start_at=start_at)
+
+
 @cli.command(name="package-wake-samples")
 @click.option("--contributor", default=None, help="Contributor folder to package (prompted if you have multiple)")
 @click.option("--phrase", default="hey rex", help="Phrase tag stored in the manifest")
