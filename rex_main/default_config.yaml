@@ -18,8 +18,16 @@ services:
     redirect_uri: "http://127.0.0.1:8888/callback"
 
 performance:
-  vad_silence_ms: 400      # Silence timeout before sending to Whisper (default: 400, low-latency: 250)
-  low_latency_mode: false  # When true: 250ms timeout, optimized for gaming
+  vad_silence_ms: 250      # Silence timeout before sending to Whisper (low-latency default: 250, standard: 400)
+  low_latency_mode: true   # Default on. Use --standard or set false for slower, more forgiving VAD timing.
+
+wake_word:
+  enabled: false                # Opt-in. Set true and `pip install rex-voice-assistant[wake_word]` to use.
+  model: "hey_jarvis"           # openWakeWord prebuilt model, or path like ~/.rex/wake_models/hey_rex.onnx
+  threshold: 0.5                # Detection confidence (0.0 - 1.0)
+  listening_window_seconds: 6   # How long after a wake-word fire commands are accepted
+  debounce_seconds: 1.0         # Minimum time between consecutive fires
+  cue_enabled: true             # Play a short audio tone on wake-word fire
 
 dashboard:
   enabled: false
