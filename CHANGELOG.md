@@ -1,5 +1,41 @@
 # REX Voice Assistant - Changelog
 
+## [1.1.0] - 2026-04-28
+
+Discord voice control. REX can now mute, unmute, deafen, undeafen, and disconnect from a Discord voice channel via voice command — without keystrokes, without Discord's whitelisted RPC scopes, and without disrupting other apps. The integration drives Discord's UI through the OS accessibility surface.
+
+### New Features
+
+#### Discord voice commands
+- New phrases: `"mute"`, `"unmute"`, `"deafen"`, `"undeafen"`, `"leave channel"`. Same shape as the existing music / clipping commands — wake-word gated, registered in the action registry, no config required.
+- `mute_toggle` and `deafen_toggle` map either of their two phrases (mute/unmute, deafen/undeafen) to the same toggle handler — Discord's Mute and Unmute buttons are the same DOM node renamed when state flips, so a held COM pointer survives the rename.
+- Patterns are tolerant of common tiny.en mishearings observed in the field: `"on mute"`, `"an mute"`, `"daffin"`, `"deafin"`, `"deaf"`, `"on deafen"`, `"on deafened"` all match. Adds zero false-positive risk in practice because the wake-word gate scopes everything to a 6-second window.
+
+#### How it works ([rex_main/actions/discord.py](rex_main/actions/discord.py))
+- Drives Discord's bottom voice-panel buttons via Windows UI Automation (`pywinauto`). One UIA `FindFirst` per button, ever — the resulting COM pointer is held forever and `.invoke()` is a direct method call on it. Steady-state per-command cost: ~10-30 ms.
+- **Cache is pre-warmed at REX startup** (mute + deafen buttons resolved) so the first voice command is fast. Cold-call cost (~1.5–4 s) happens during startup where it's invisible. Disconnect resolves lazily on first use since the button only exists when in a voice channel.
+- **Sibling-of-Deafen anchor** disambiguates the duplicate Mute / Disconnect buttons that Discord exposes in the channel-header banner when in voice. Deafen is globally unique in Discord's accessibility tree (the header banner has no Deafen button), so we resolve Deafen directly and find Mute / Disconnect as its immediate siblings — scoping the lookup to the bottom voice panel container without enumerating the whole tree.
+- Held wrappers are independent of window position, size, monitor, or DPI — they identify UIA elements, not screen coordinates. Move Discord anywhere; the commands keep working.
+
+#### New runtime dependency
+- Added `pywinauto>=0.6.8,<1` to base dependencies. Pulls `comtypes` and `pywin32` transitively. ~500 ms one-time REX startup cost; negligible per-call. `pip-audit` clean for the new packages.
+
+#### Action registry
+- New `discord` backend in [rex_main/actions/discord.py](rex_main/actions/discord.py) following the recipe in [docs/ACTIONS.md](docs/ACTIONS.md).
+- Three actions: `discord_mute_toggle`, `discord_deafen_toggle`, `discord_disconnect`. Currently registered with `slot=None` (always-on, like SteelSeries) since Discord is the only `voice_chat` implementer. The slot can be reintroduced when a second backend (TeamSpeak, Mumble) competes for it.
+
+### Documentation
+- [docs/DECISIONS.md](docs/DECISIONS.md): new entry "Discord voice control via UIA (not RPC, not keystrokes)" — records the three blocked alternatives (Discord RPC `SET_VOICE_SETTINGS` whitelist, global keystrokes, `PostMessage(WM_KEYDOWN)` to Chromium's window) and why each was rejected.
+- [docs/ACTIONS.md](docs/ACTIONS.md): inventory updated with the discord section; voice_chat slot still listed as `*(future)*` with an explanatory note.
+- [README.md](README.md): voice commands table extended with the three Discord rows.
+- [_local/discord_uia_dump.py](_local/discord_uia_dump.py): kept around as the canonical UIA spike — re-run if Discord ever renames its accessibility labels.
+
+### Known Limitations
+- **English Discord client only.** Button-name lookup is exact-match on `"Mute"` / `"Deafen"` / `"Disconnect"`; localized clients will silently no-op until those constants are updated.
+- **Doesn't work when Discord is minimized.** Chromium tears down the accessibility tree on minimize, so UIA can't see the window. Restoring Discord (even just clicking its taskbar icon) recovers; planned for a future release with an auto-restore path that doesn't steal focus.
+- **Disconnect requires being in a voice channel** (button only exists when active). Logs a warning and no-ops otherwise.
+- **No content-generating actions** (sending messages, joining channels). Scope is intentionally narrow to keep the integration defensible against Discord's self-bot policy.
+
 ## [1.0.1] - 2026-04-26
 
 PyPI re-cut. The 1.0.0 wheel partially uploaded then PyPI registered the filename, blocking the re-publish; 1.0.1 is the first usable PyPI release containing the full 1.0 feature set described below.
@@ -55,12 +91,12 @@ PyPI re-cut. The 0.3.0 version slot was registered before all of the planned 0.3
 - New CLI command **`rex record-wake-samples`** — guided recorder that captures ~100 clean 16 kHz mono WAVs (with peak/clipping validation, retry-on-bad, and a session notes file) ready to feed straight into the openWakeWord training pipeline.
 - **Custom `.onnx` models load by file path**: set `wake_word.model: ~/.rex/wake_models/hey_rex.onnx` in your config and REX will use it instead of the prebuilt `hey_jarvis`. Underlying `Model()` already supports paths; we just expand `~` and log a differentiated startup message.
 - **Setup wizard auto-discovery**: `rex setup` scans `~/.rex/wake_models/` and presents any custom `.onnx` files alongside `hey_jarvis`, defaulting to the most recently modified one.
-- New full walkthrough: [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) — covers recording, environment setup, synthetic-positive generation, mixing in user recordings, training on a single GPU (~1 hr on a 3070 Ti), validation, and threshold tuning. Targets the "Option B" approach (synthetic + your voice) for best per-user accuracy.
+- New full walkthrough: [TRAINING_HEY_REX.md](docs/specifics/TRAINING_HEY_REX.md) — covers recording, environment setup, synthetic-positive generation, mixing in user recordings, training on a single GPU (~1 hr on a 3070 Ti), validation, and threshold tuning. Targets the "Option B" approach (synthetic + your voice) for best per-user accuracy.
 - **Multi-speaker contribution flow** for training a single model across multiple voices:
   - `rex record-wake-samples --contributor <name>` (or interactive prompt) namespaces recordings under `~/.rex/wake_training/recordings/<name>/` so multiple people's samples can be merged without filename clashes.
   - New `rex package-wake-samples` command zips a contributor's WAVs plus a `manifest.json` (sample count, peak/RMS distribution, microphone, OS) for submission.
-  - New non-coder-friendly contribution guide [CONTRIBUTING_VOICE_SAMPLES.md](CONTRIBUTING_VOICE_SAMPLES.md) — walks a friend through installing REX via `pipx`, recording 100 samples, and producing a labeled `.zip` to send back, in plain English with no code knowledge assumed.
-  - [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) Phase 4 expanded with PowerShell merge scripts and per-contributor manifest spot-check guidance.
+  - New non-coder-friendly contribution guide [CONTRIBUTING_VOICE_SAMPLES.md](docs/specifics/CONTRIBUTING_VOICE_SAMPLES.md) — walks a friend through installing REX via `pipx`, recording 100 samples, and producing a labeled `.zip` to send back, in plain English with no code knowledge assumed.
+  - [TRAINING_HEY_REX.md](docs/specifics/TRAINING_HEY_REX.md) Phase 4 expanded with PowerShell merge scripts and per-contributor manifest spot-check guidance.
 - **Quality-control commands for recordings**:
   - `rex review-wake-samples` — interactive playback with keep / reject / replay / quit. Rejected files move to `_rejected/` (recoverable, not deleted).
   - `rex retrim-wake-samples` — re-trims existing recordings with the asymmetric trim policy (lower 0.005 threshold, 150 ms lead pad, 400 ms tail pad). Originals back up to `_untrimmed/` so the operation is reversible. Includes a `--dry-run` mode that reports duration distribution and flags suspect clips ("barely changed" likely means cut-off; "<0.6 s" likely means fast utterance or fragment).

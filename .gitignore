@@ -33,8 +33,8 @@ _local/
 upload_to_hf.py
 
 # Internal planning / session-scratch docs (keep on disk for personal use)
-ASSISTANT_ROADMAP.md
-DEVELOPMENT.md
-SESSION_SUMMARY.md
 CLAUDE.md
-REX_RESUME_CONTEXT.md
+docs/ASSISTANT_ROADMAP.md
+docs/DEVELOPMENT.md
+docs/REX_RESUME_CONTEXT.md
+docs/archive/

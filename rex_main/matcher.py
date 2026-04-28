@@ -1,16 +1,14 @@
-"""
-matcher.py
+"""matcher.py
 Regex-based command dispatcher for the REX assistant.
 
-Usage inside your main program (rex.py):
+Patterns and handlers are pulled live from the action registry
+(`rex_main.actions`). This module just compiles the active subset and
+runs the dispatch loop.
+
+Usage inside rex.py:
 
     text_q = asyncio.Queue()
     asyncio.create_task(dispatch_command(text_q))
-
-Each message pulled from *text_q* is compared against the patterns below.
-On the first match the corresponding function inside *commands.py* is
-invoked (synchronously for now; wrap in run_in_executor if commands turn
-CPU-heavy).
 """
 
 from __future__ import annotations
@@ -19,10 +17,12 @@ import asyncio
 import logging
 import re
 import time
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
-import rex_main.commands as commands
-import rex_main.steelseries as steelseries
+from typing import Any, Callable
+
+from rex_main import actions
+from rex_main.actions.registry import on_rebuild
 from rex_main.metrics import metrics
 
 if TYPE_CHECKING:
@@ -32,75 +32,49 @@ __all__ = ["dispatch_command", "COMMAND_PATTERNS", "NO_EARLY_MATCH_COMMANDS"]
 
 logger = logging.getLogger(__name__)
 
-# Commands that should NOT use early matching (wait for full utterance)
-# These are commands with variable arguments that could be cut off mid-speech
-NO_EARLY_MATCH_COMMANDS: set[str] = {
-    "search_song",      # "search X by Y" - would early-match on "search up" instead of "search upside down"
-    "queue_track",      # "next track X" - same issue
-    "volume_up",        # "volume up" early-matches before "volume up to 50"-style numeric variants land
-    "volume_down",
-    "set_volume",       # "volume 50" - wait for full number to avoid "volume 5" firing early
-}
+
+# Compiled-pattern cache, rebuilt whenever the active backend set changes.
+# Each entry is (compiled_regex, action_name) for back-compat with the
+# rex.py FastVAD path. _DISPATCH_TABLE is the dispatcher's hot path and
+# additionally carries the resolved handler so we don't look it up per match.
+COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = []
+# Action names that should NOT match early (wait for full utterance).
+NO_EARLY_MATCH_COMMANDS: set[str] = set()
+_DISPATCH_TABLE: list[tuple[re.Pattern[str], str, Callable[..., Any]]] = []
 
 
-# Common helpers (for robustness)
-_END   = r"[.!?\s]*$"              # trailing punctuation / spaces
-_WORD  = r"\s*"                    # surrounding spaces
-
-COMMAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-
-    # Music commands
-    #  play / pause
-    (re.compile(rf"^{_WORD}stop\s+music{_WORD}{_END}",  re.I), "stop_music"),
-    (re.compile(rf"^{_WORD}play\s+music{_WORD}{_END}", re.I), "play_music"),
-
-
-    #  track navigation
-    (re.compile(rf"^{_WORD}(?:next|skip){_WORD}{_END}", re.I), "next_track"),
-    (re.compile(rf"^{_WORD}(?:last|previous){_WORD}{_END}", re.I), "previous_track"),
-    (re.compile(rf"^{_WORD}restart{_WORD}{_END}", re.I), "restart_track"),
-    (re.compile(rf"^{_WORD}search\s+(.+?)(?:\s+by\s+(.+?))?{_END}", re.I), "search_song"),
-
-
-    #  volume control
-    (re.compile(rf"^{_WORD}volume up{_END}",   re.I), "volume_up"),
-    (re.compile(rf"^{_WORD}volume down{_END}", re.I), "volume_down"),
-    (re.compile(rf"^{_WORD}volume\s+(\d{{1,3}}){_WORD}{_END}", re.I), "set_volume"),
+def _rebuild() -> None:
+    """Recompile COMMAND_PATTERNS / _DISPATCH_TABLE / NO_EARLY_MATCH_COMMANDS."""
+    new_patterns: list[tuple[re.Pattern[str], str]] = []
+    new_table: list[tuple[re.Pattern[str], str, Callable[..., Any]]] = []
+    new_no_early: set[str] = set()
+    for spec in actions.active_specs():
+        for src in spec.patterns:
+            compiled = re.compile(src, re.I)
+            new_patterns.append((compiled, spec.name))
+            new_table.append((compiled, spec.name, spec.handler))
+        if spec.no_early_match:
+            new_no_early.add(spec.name)
+    COMMAND_PATTERNS[:] = new_patterns
+    _DISPATCH_TABLE[:] = new_table
+    NO_EARLY_MATCH_COMMANDS.clear()
+    NO_EARLY_MATCH_COMMANDS.update(new_no_early)
+    logger.debug("Matcher rebuilt: %d patterns, %d no-early-match",
+                 len(COMMAND_PATTERNS), len(NO_EARLY_MATCH_COMMANDS))
 
 
-    #  like / dislike
-    (re.compile(rf"^{_WORD}like{_WORD}{_END}",    re.I), "like"),
-    (re.compile(rf"^{_WORD}dislike{_WORD}{_END}", re.I), "dislike"),
-
-    #  Others commands
-    (re.compile(rf"^{_WORD}this\s+is\s+so\s+sad{_WORD}{_END}", re.I), "so_sad"),
-    (re.compile(rf"^{_WORD}shuffle\s+on{_END}", re.I),  "shuffle_on"),
-    (re.compile(rf"^{_WORD}shuffle\s+off{_END}", re.I), "shuffle_off"),
-    (re.compile(rf"^{_WORD}repeat\s+(off|context|track){_END}", re.I), "set_repeat"),       # captures “off”, “context”, or “track”)
-    (re.compile(rf"^{_WORD}next\s+track(?:\s*[,;:]\s*|\s+)(.+?){_END}", re.I), "queue_track"),  # Queue a specific URI (e.g. “next track (song name)”)
-    (re.compile(rf"^{_WORD}(?:what(?:'s)?\s+playing|current\s+track\s+info|track\s+info){_END}",re.I), "current_track_info"),
-
-
-    #  Switching music apps (spotify, youtube music)
-    (re.compile(rf"^{_WORD}switch\s+to\s+spotify{_END}", re.I), "configure_spotify"),
-    (re.compile(rf"^{_WORD}switch\s+to\s+youtube\s+music{_END}", re.I), "configure_ytmd"),
-
-    # Clipping (SteelSeries Moments)
-    # Multiple phrases for better recognition - "capture" and "record" have harder consonants
-    (re.compile(rf"^{_WORD}(?:clip\s+(?:that|it)|save\s+(?:that|clip)|capture\s+(?:that|it)|record\s+(?:that|clip)){_END}", re.I), "clip_that"),
-]
+# Subscribe to registry rebuilds so service-switch actions take effect immediately.
+on_rebuild(_rebuild)
+_rebuild()
 
 
 # Public coroutine
+
 async def dispatch_command(
     text_queue: "asyncio.Queue[str]",
     listening_state: "Optional[ListeningState]" = None,
 ):
-    """Forever task that reads recognised text and triggers handlers.
-
-    If `listening_state` is provided and its gate is enabled, commands are only
-    invoked when the listening window is active (post wake-word).
-    """
+    """Forever task that reads recognised text and triggers handlers."""
     logger.info("dispatch_command started - awaiting recognized text")
 
     while True:
@@ -108,25 +82,23 @@ async def dispatch_command(
         logger.debug("Received text: %s", text)
 
         matched = False
-        for pattern, func_name in COMMAND_PATTERNS:
+        for pattern, action_name, handler in _DISPATCH_TABLE:
             m = pattern.match(text)
             if m:
                 matched = True
                 if listening_state is not None and not listening_state.is_active():
-                    logger.debug("Command '%s' suppressed - wake word not active", func_name)
-                    metrics.record_command_suppressed(func_name)
+                    logger.debug("Command '%s' suppressed - wake word not active", action_name)
+                    metrics.record_command_suppressed(action_name)
                     break
                 if listening_state is not None:
                     listening_state.activate()
-                logger.info("Matched command '%s'", func_name)
-                # Record match for metrics
-                metrics.record_command_match(func_name, matched=True)
-                _call_handler(func_name, m.groups())
+                logger.info("Matched action '%s'", action_name)
+                metrics.record_command_match(action_name, matched=True)
+                _invoke(action_name, handler, m.groups())
                 break
 
         if not matched:
             logger.debug("No command matched for input: %r", text)
-            # Record unmatched for metrics
             metrics.record_command_match(None, matched=False)
 
         text_queue.task_done()
@@ -134,23 +106,11 @@ async def dispatch_command(
 
 # Helpers
 
-def _call_handler(func_name: str, args: tuple[str, ...]):
-    """Look up handler in commands or steelseries module and invoke it with *args*."""
-
-    # Try commands module first, then steelseries module
-    func: Callable[..., None] | None = getattr(commands, func_name, None)
-    if func is None:
-        func = getattr(steelseries, func_name, None)
-    if not callable(func):
-        logger.error("Handler '%s' not found in commands.py or steelseries.py", func_name)
-        return
-
+def _invoke(action_name: str, handler: Callable[..., Any], args: tuple[str, ...]):
     try:
         t0 = time.perf_counter()
-        func(*args)
+        handler(*args)
         dt = (time.perf_counter() - t0) * 1000
-        # Record execution time for metrics
-        metrics.record_command_execute(func_name, dt)
-        # Note: benchmark.record_command is called from whisper_worker after full pipeline
+        metrics.record_command_execute(action_name, dt)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Error while executing '%s': %s", func_name, exc)
+        logger.exception("Error while executing %r: %s", action_name, exc)

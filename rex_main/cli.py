@@ -176,8 +176,8 @@ def setup():
 def record_wake_samples_cmd(count: int, phrase: str, contributor: Optional[str], output_dir: Optional[str], device: Optional[str]):
     """Record samples for training a custom wake-word model.
 
-    See TRAINING_HEY_REX.md for the full training walkthrough,
-    or CONTRIBUTING_VOICE_SAMPLES.md if you're contributing to someone else's model.
+    See docs/specifics/TRAINING_HEY_REX.md for the full training walkthrough,
+    or docs/specifics/CONTRIBUTING_VOICE_SAMPLES.md if you're contributing to someone else's model.
     """
     from rex_main.recorder import record_wake_samples
     record_wake_samples(

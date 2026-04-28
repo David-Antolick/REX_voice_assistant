@@ -58,6 +58,10 @@ jobs:
           print('Graceful degradation OK')
           "
 
+      - name: Run action registry suite (correctness + perf ceilings)
+        # See docs/ACTIONS.md for the contract this enforces.
+        run: pytest test_actions.py -v
+
   lint:
     runs-on: windows-latest
     steps:

@@ -27,7 +27,7 @@ from rex_main.whisper_worker import WhisperWorker
 from rex_main.matcher import dispatch_command, COMMAND_PATTERNS, NO_EARLY_MATCH_COMMANDS
 from rex_main.metrics_printer import print_metrics_loop
 from rex_main.benchmark import benchmark
-import rex_main.commands as commands
+from rex_main import actions
 
 import logging
 logger = logging.getLogger("rex")
@@ -226,7 +226,7 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
                     return
                 # Refresh window so multi-step interactions work without re-waking.
                 listening_state.activate()
-                func = getattr(commands, func_name, None)
+                func = actions.resolve_handler(func_name)
                 if callable(func):
                     func(*args)
 

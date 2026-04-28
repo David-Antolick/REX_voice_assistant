@@ -126,6 +126,9 @@ rex migrate --from-env  # Import settings from .env file
 | "switch to youtube music"         | Switch backend to YTMD      |
 | "like", "dislike"                 | Thumbs up/down current track|
 | "clip that", "save clip"          | Save clip (SteelSeries GG)  |
+| "mute", "unmute"                  | Discord mic mute toggle     |
+| "deafen", "undeafen"              | Discord deafen toggle       |
+| "leave channel"                   | Disconnect from Discord voice |
 
 Add custom commands by editing `rex_main/matcher.py` and `rex_main/commands.py`.
 
@@ -166,7 +169,7 @@ The listening window auto-extends each time a command fires, so multi-step inter
 
 #### Custom wake word ("hey rex" or anything else)
 
-You can train a model on your own voice and any phrase you want. See [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) for the conceptual walkthrough, or [TRAINING_RERUN.md](TRAINING_RERUN.md) for the field-tested speed-run recipe (every gotcha pre-solved). Record ~100 samples with `rex record-wake-samples`, run the openWakeWord training pipeline (~1 hour on a recent NVIDIA GPU), drop the resulting `.onnx` into `~/.rex/wake_models/`, and point your config at it:
+You can train a model on your own voice and any phrase you want. See [TRAINING_HEY_REX.md](docs/specifics/TRAINING_HEY_REX.md) for the conceptual walkthrough, or [TRAINING_RERUN.md](docs/specifics/TRAINING_RERUN.md) for the field-tested speed-run recipe (every gotcha pre-solved). Record ~100 samples with `rex record-wake-samples`, run the openWakeWord training pipeline (~1 hour on a recent NVIDIA GPU), drop the resulting `.onnx` into `~/.rex/wake_models/`, and point your config at it:
 
 ```yaml
 wake_word:
@@ -178,9 +181,9 @@ The setup wizard auto-discovers any `.onnx` files in `~/.rex/wake_models/` and o
 
 **Multi-speaker training (recommended):** if you can recruit 3–5 people to each contribute ~100 recordings, the resulting model will generalize across voices much better than a single-speaker model. The contributor flow is non-coder-friendly:
 
-- Send your friends [CONTRIBUTING_VOICE_SAMPLES.md](CONTRIBUTING_VOICE_SAMPLES.md) — it walks them through installing REX, recording 100 samples, and packaging the result into a single `.zip` to send back.
+- Send your friends [CONTRIBUTING_VOICE_SAMPLES.md](docs/specifics/CONTRIBUTING_VOICE_SAMPLES.md) — it walks them through installing REX, recording 100 samples, and packaging the result into a single `.zip` to send back.
 - They run `rex record-wake-samples` (which prompts for their name) and `rex package-wake-samples` (which produces a labeled zip).
-- You merge the zips into `~/.rex/wake_training/recordings/` and train. See [TRAINING_HEY_REX.md](TRAINING_HEY_REX.md) Phase 4 for the merge step.
+- You merge the zips into `~/.rex/wake_training/recordings/` and train. See [TRAINING_HEY_REX.md](docs/specifics/TRAINING_HEY_REX.md) Phase 4 for the merge step.
 
 ---
 

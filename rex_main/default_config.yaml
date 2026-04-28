@@ -12,7 +12,7 @@ model:
 services:
   active: "none"  # none | ytmd | spotify
   ytmd:
-    host: "localhost"
+    host: "127.0.0.1"  # not "localhost" — avoids ~2s Windows IPv6 fallback per call
     port: 9863
   spotify:
     redirect_uri: "http://127.0.0.1:8888/callback"
