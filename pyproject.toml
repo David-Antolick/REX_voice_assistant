@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rex-voice-assistant"
-version = "1.1.0"
+version = "1.2.0"
 description = "Offline voice assistant for controlling YouTube Music Desktop and Spotify"
 readme = "README.md"
 license = "MIT"
@@ -46,7 +46,7 @@ dependencies = [
     "uvicorn[standard]>=0.30,<1.0",
     "websockets>=13.0,<17",
     "openwakeword>=0.6,<1",
-    "pywinauto>=0.6.8,<1",
+    "PySide6>=6.7,<7",
 ]
 
 [project.optional-dependencies]
@@ -70,6 +70,12 @@ dev = [
 [project.scripts]
 rex = "rex_main.cli:main"
 
+[project.gui-scripts]
+# Windowed launcher: produces rex-gui.exe linked against pythonw.exe so it
+# starts without popping a console window. Pin this one to Start menu,
+# Taskbar, or Startup folder to launch REX into the tray with no terminal.
+rex-gui = "rex_main.cli:main_gui"
+
 [project.urls]
 Homepage = "https://github.com/David-Antolick/rex_voice_assistant"
 
@@ -78,4 +84,4 @@ where = ["."]
 include = ["rex_main*"]
 
 [tool.setuptools.package-data]
-rex_main = ["default_config.yaml", "dashboard/static/*"]
+rex_main = ["default_config.yaml", "dashboard/static/*", "ui/assets/*"]

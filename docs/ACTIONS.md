@@ -104,7 +104,7 @@ by config or by `switch_to_*` voice commands).
 | Slot | Meaning | Current backends |
 |---|---|---|
 | `music` | Audio playback / queue / library | `ytmd`, `spotify` |
-| *(future)* `voice_chat` | Discord-style voice mute/deafen (currently `discord` is the sole backend, runs as `slot=None`; introduce the slot when a second backend competes) | `discord` |
+| *(future)* `voice_chat` | Voice mute/deafen for Spacebar/Fermi (planned) | `spacebar` |
 | *(future)* `system_audio` | Per-app and system volume | `windows_audio` |
 | *(future)* `game_platform` | Launching games / library queries | `steam` |
 | *(future)* `clipping` | Currently always-on (one backend) | `steelseries` |
@@ -173,21 +173,6 @@ Preconditions for all: YTMD desktop app running with Companion-Server enabled.
 
 Preconditions for all: Spotify Connect device available; OAuth credentials configured.
 
-### `discord` — Discord voice control (slot: `None`, transport: `os_native`)
-
-| Action | Capability | Phrases | Args | Side effects |
-|---|---|---|---|---|
-| `discord_mute_toggle` | `toggle_mic` | "mute", "unmute" | — | `voice_mute_state` |
-| `discord_deafen_toggle` | `toggle_deafen` | "deafen", "undeafen" | — | `voice_deafen_state` |
-| `discord_disconnect` | `disconnect_voice` | "leave channel" | — | `voice_connection` |
-
-Preconditions: Discord desktop app running. Disconnect also requires being in a
-voice channel.
-
-English Discord client only — UIA button-name lookup is case- and
-locale-sensitive. Mute/Unmute and Deafen/Undeafen are the same button renamed
-by Discord, so the held COM pointer survives the rename.
-
 ### `steelseries` — SteelSeries GG Moments (slot: `None`, transport: `gamesense`)
 
 | Action | Capability | Phrases | Args | Side effects |
@@ -203,6 +188,21 @@ autoclipping enabled in GG → Settings → Moments → Apps.
 |---|---|---|---|---|
 | `switch_to_spotify` | `switch_music_backend` | "switch to spotify" | — | `active_music_backend` |
 | `switch_to_ytmd` | `switch_music_backend` | "switch to youtube music" | — | `active_music_backend` |
+
+### `apps` — Application launch / close (slot: `None`, transport: `os_native`)
+
+| Action | Capability | Phrases | Args | Side effects |
+|---|---|---|---|---|
+| `apps_open_youtube_music` | `open_app` | "open / launch / start youtube music" | — | `ytmd_process_running` |
+| `apps_close_youtube_music` | `close_app` | "close / quit / exit / kill youtube music" | — | `ytmd_process_running` |
+| `apps_open_spotify` | `open_app` | "open / launch / start spotify" | — | `spotify_process_running` |
+| `apps_close_spotify` | `close_app` | "close / quit / exit / kill spotify" | — | `spotify_process_running` |
+
+Launch resolves the first existing path from a small candidate list per
+app (LocalAppData → Program Files → Microsoft Store WindowsApps). Close
+shells out to `taskkill /F` against the app's image name. If the app
+isn't installed in any known location, the open command logs a warning
+and does nothing.
 
 ---
 

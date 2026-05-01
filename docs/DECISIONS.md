@@ -18,6 +18,203 @@ Format:
 
 ---
 
+## 2026-04-28 — Desktop UI v1: PySide6 tray + HUD + settings, in-process with asyncio in a QThread
+
+**Context:** REX has lived in the terminal since launch. The vision
+doc at [UI_PLAN.md](UI_PLAN.md) commits us to a real desktop surface as
+the default — a tray icon, a transient recognition HUD that flashes the
+recognized command, and a small settings dialog. The web-dashboard
+direction is dead (it's still in-tree but no longer the long-term home).
+Independent research (Wispr Flow, WillowVoice, SuperWhisper, Dragon,
+Voice Access, Talon) shows this three-piece pattern is the convergence
+point for desktop voice assistants.
+
+**Decision:**
+
+- **Toolkit: PySide6** (LGPL, Qt 6.7+). Only Python toolkit that gives
+  native Win11 look, first-class system tray (`QSystemTrayIcon`), an
+  easy frameless translucent overlay (HUD), good HiDPI, and a mature
+  PyInstaller story in one stack. Added as a required base dependency
+  in [pyproject.toml](../pyproject.toml) — UI is the default surface,
+  not an opt-in.
+- **Process model: single process.** Qt main thread owns the UI; a
+  worker `QThread` (`AssistantThread`) owns its own asyncio loop and
+  runs the unmodified `run_assistant()` coroutine. The runtime invokes
+  a plain Python callback at lifecycle events; the callback is bound
+  to a `UiBridge(QObject)` whose Qt signals marshal events back to the
+  main thread via auto-queued connections. No `qasync` dep needed.
+- **Runtime hooks are additive and optional.** Both
+  `run_assistant(opts, config, ui_callback=None, paused=None)` and
+  `dispatch_command(text_q, listening_state=None, ui_callback=None, paused=None)`
+  no-op when the UI args are absent, so console mode is byte-identical
+  to today.
+- **CLI shape:** `rex` defaults to the tray app. `rex --console`
+  preserves the existing console-loop behavior for debugging and
+  headless runs.
+
+**Alternatives considered:**
+
+- **tkinter / customtkinter.** Looks dated on Win11, flickers on the
+  frameless-overlay show/hide pattern, no native tray. Would have
+  required `pystray` plus manual translucency hacks.
+- **wxPython, Toga, Flet, DearPyGui.** Each fails on at least one of:
+  native Win11 look, tray support, frameless click-through overlay,
+  HiDPI, packaging maturity.
+- **Subprocess split** (UI as a separate process speaking to a runtime
+  subprocess). Cleaner thread story but doubles the operational
+  surface for a single-user passion project. Single-process with a
+  worker QThread is the right fit.
+- **Hybrid tray + browser dashboard.** Rejected: we're explicitly
+  retiring the web UI direction, and a browser tab is the wrong shape
+  for an always-on background app.
+
+**Consequences:**
+
+- Adds ~60 MB to the install (PySide6). Acceptable next to torch +
+  faster-whisper, which already dominate footprint.
+- The runtime still depends on nothing UI-specific; it can run
+  headless via `rex --console` exactly as before.
+- Future expansions (command history, mic test, push-to-talk capture,
+  per-app profiles) all fit naturally into the same Qt surface
+  without reopening this decision.
+- The FastAPI metrics dashboard is left in place for now (off by
+  default). Removing it is a separate decision tracked in the vision
+  doc as out-of-scope for v1.
+
+**See also:** [UI_PLAN.md](UI_PLAN.md) for the v1/v1.x/v2 vision, the
+v1 build plan at `~/.claude/plans/stateless-gathering-lake.md`, and
+the new `rex_main/ui/` package.
+
+---
+
+## 2026-04-28 — Removed Discord integration; future voice chat will target Spacebar/Fermi
+
+**Context:** Two prior decisions in this log stood up the Discord
+integration: [Discord voice control via UIA](#2026-04-27--discord-voice-control-via-uia-not-rpc-not-keystrokes)
+(why we used UIA at all) and [Ship `show discord` / `minimize discord`
+instead of auto-restore](#2026-04-28--ship-show-discord--minimize-discord-instead-of-auto-restore)
+(why we couldn't make it work cleanly while Discord is minimized). The
+core constraint — Chromium tears down its accessibility tree whenever
+its window isn't foreground, and no documented programmatic technique
+forces a rebuild — was confirmed empirically against every workaround
+in [LESSONS.md](LESSONS.md#chromium-tears-down-its-uia-tree-when-its-window-isnt-foreground--and-you-cant-programmatically-force-a-rebuild).
+
+The user's group is migrating to a self-hosted **Spacebar** instance
+(via the **Fermi** web client). Spacebar is open-source and
+Discord-API-compatible; it can be self-hosted, scopes are not
+whitelist-gated, and the web-app delivery model means none of the
+Chromium-renderer-suspension issues apply (REX would talk to the
+Spacebar HTTP / Gateway / RPC surfaces directly, not to a window).
+
+**Decision:** Rip the Discord integration out of REX. Keep the lessons
+and decisions in the docs (they remain valuable for any future Electron
+/ Chromium app integration). The voice-chat slot stays in the planned
+slots table but is now reserved for a future `spacebar` backend that
+will be designed in a separate workstream against the user's
+self-hosted Spacebar server.
+
+**Removed:**
+- `rex_main/actions/discord.py`
+- `pywinauto>=0.6.8,<1` from `pyproject.toml` dependencies (it was added
+  solely for the Discord UIA backend and has no other consumer in REX)
+- The Discord rows in `README.md` voice commands table
+- The Discord section in `ACTIONS.md` inventory
+- The `discord_module.warm()` call in `actions/service.py`
+- The `from rex_main.actions import discord` line in `actions/__init__.py`
+
+**Kept (intentionally):**
+- The two prior Discord-related entries in this DECISIONS log. They
+  record real engineering work and the negative-result writeup is
+  exactly the value future-us needs.
+- [LESSONS.md](LESSONS.md#chromium-tears-down-its-uia-tree-when-its-window-isnt-foreground--and-you-cant-programmatically-force-a-rebuild) —
+  the empirical writeup applies to any future Electron-app integration
+  (Slack, OBS, Teams, etc.), not just Discord.
+- `_local/wm_getobject_experiment.py`, `_local/offscreen_experiment.py`,
+  `_local/discord_uia_dump.py` — kept as gitignored reproductions in
+  case the situation re-emerges with another Chromium app.
+- The published 1.1.0 wheel on PyPI, which still contains the Discord
+  integration, untouched. Users who want it can pin
+  `rex-voice-assistant==1.1.0`. The next published release will drop
+  the integration and bump accordingly.
+
+**Alternatives considered:**
+- *Keep the Discord integration as a documented best-effort feature.*
+  Rejected: the "works only when Discord is foreground" caveat is
+  enough of a foot-gun that shipping it implies more reliability than
+  the constraint allows. The user's group migrating away from Discord
+  removes the incentive to maintain it.
+- *Document `--force-renderer-accessibility` as the official setup step
+  and ship as-is.* Rejected: the friction of asking every user to edit
+  their Discord shortcut for an integration we're about to abandon
+  isn't worth it.
+
+**Consequences:**
+- REX is back to YTMD / Spotify / SteelSeries as its supported
+  integrations until the Spacebar backend lands.
+- The action registry's `voice_chat` slot is reserved for the future
+  `spacebar` backend rather than being introduced for one specific
+  client.
+- Any further work on voice-chat control happens in a separate plan
+  against the user's self-hosted Spacebar server, where the API is
+  open and the constraints are different.
+
+**See also:** [LESSONS.md](LESSONS.md#chromium-tears-down-its-uia-tree-when-its-window-isnt-foreground--and-you-cant-programmatically-force-a-rebuild),
+[`pyproject.toml`](../pyproject.toml).
+
+---
+
+## 2026-04-28 — Ship `show discord` / `minimize discord` instead of auto-restore
+
+**Context:** The 1.1.0 Discord integration silently fails when Discord is
+minimized — Chromium tears down the UIA accessibility tree. Spent a session
+attempting every documented workaround to programmatically force the tree
+to rebuild after a programmatic restore: `SW_SHOWNOACTIVATE`, `SW_RESTORE`,
+`AttachThreadInput` focus-merge trick, `BringWindowToTop` + `SetForegroundWindow`
+combos, off-screen positioning, `WM_GETOBJECT` to top-level window and to the
+`Intermediate D3D Window` child with three different lParam values
+(custom=1, `OBJID_CLIENT=-4`, `OBJID_NATIVEOM=-16`). All confirmed by direct
+experiment to either restore the window without rebuilding the tree, or fail
+to restore at all. Full empirical write-up in
+[LESSONS.md](LESSONS.md#chromium-tears-down-its-uia-tree-when-its-window-isnt-foreground--and-you-cant-programmatically-force-a-rebuild).
+
+**Decision:** Don't try to auto-restore. Ship two new voice commands —
+`discord_show` ("show discord") and `discord_minimize` ("minimize discord") —
+that handle window state explicitly. Drop the auto-restore-on-invoke path
+that was added experimentally. Document the
+`--force-renderer-accessibility` shortcut tweak in
+[ACTIONS.md](ACTIONS.md#discord--discord-voice-control-slot-none-transport-os_native)
+as the canonical fix for users who want voice commands to work
+unconditionally regardless of window state.
+
+**Alternatives considered:**
+- *Auto-restore with focus theft on every invoke.* Rejected: even with
+  `SW_RESTORE` + AttachThreadInput, Chromium frequently leaves the tree
+  empty post-restore. The user pays the focus blink for an unreliable
+  result.
+- *Ship the auto-restore as best-effort and silently fail.* Rejected: the
+  failure mode is worse than current — user says "mute me", nothing happens,
+  no clear feedback on why.
+- *Bundle a launcher that adds `--force-renderer-accessibility` to Discord's
+  shortcut on REX install.* Rejected: too invasive (modifies user's app
+  shortcuts), brittle to Discord auto-update overwriting it.
+
+**Consequences:**
+- Adds two voice commands (`show discord`, `minimize discord`) as a
+  general-purpose primitive that's useful on its own — voice-controlled
+  window state for a frequently-tucked-away app.
+- Discord-with-mute-while-minimized requires the
+  `--force-renderer-accessibility` setup step. Documented; one-time edit;
+  works permanently.
+- Pattern generalizes: future Electron-app integrations (Slack, OBS, Teams)
+  inherit the same constraint and the same `show`/`minimize` recipe.
+
+**See also:** [LESSONS.md](LESSONS.md#chromium-tears-down-its-uia-tree-when-its-window-isnt-foreground--and-you-cant-programmatically-force-a-rebuild),
+[rex_main/actions/discord.py](../rex_main/actions/discord.py),
+[`_local/wm_getobject_experiment.py`](../_local/wm_getobject_experiment.py),
+[`_local/offscreen_experiment.py`](../_local/offscreen_experiment.py).
+
+---
+
 ## 2026-04-27 — Discord voice control via UIA (not RPC, not keystrokes)
 
 **Context:** Wanted voice commands for Discord mute/deafen/disconnect. Three

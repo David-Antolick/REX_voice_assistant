@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import os
 
-from rex_main.actions import discord as _discord_module
 from rex_main.actions import ytmd as _ytmd_module
 from rex_main.actions import spotify as _spotify_module
 from rex_main.actions.registry import action, set_active_backend, set_active_backends
@@ -63,9 +62,6 @@ def configure_from_config(config: dict) -> None:
     else:
         set_active_backends({"music": None})
         logger.warning("No music backend active — running in transcription-only mode")
-
-    # Always-on integrations: pre-warm so the first voice command is fast.
-    _discord_module.warm()
 
 
 def _warm_client(getter, name: str) -> None:

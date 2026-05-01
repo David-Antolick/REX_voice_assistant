@@ -18,7 +18,7 @@ import argparse
 import asyncio
 import signal
 import sys
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 import numpy as np
 
 from rex_main.audio_stream import AudioStream
@@ -70,13 +70,33 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 # Main orchestration
 
-async def run_assistant(opts: Any, config: Optional[dict] = None):
+async def run_assistant(
+    opts: Any,
+    config: Optional[dict] = None,
+    ui_callback: Optional[Callable[..., None]] = None,
+    paused: Optional[Any] = None,
+):
     """Main entry-point coroutine for the voice assistant.
 
     Args:
         opts: Options object with model, device, beam, log_file, debug attributes
         config: Optional configuration dictionary (used for pulse_server, etc.)
+        ui_callback: Optional callable invoked with lifecycle events. Called as
+            ``ui_callback(event: str, **payload)``. Events:
+            ``"state.idle"``, ``"state.listening"``, ``"state.paused"``,
+            ``"state.error"``, ``"match"`` (action, text, args),
+            ``"no_match"`` (text). Exceptions are caught and logged.
+        paused: Optional ``threading.Event``-like object. When set,
+            ``dispatch_command`` drops incoming utterances silently.
     """
+
+    def _emit(event: str, **payload):
+        if ui_callback is None:
+            return
+        try:
+            ui_callback(event, **payload)
+        except Exception:
+            logger.exception("ui_callback raised on %s event", event)
 
    # ___ Logging setup ___
     root = logging.getLogger()
@@ -155,6 +175,26 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
         default_window_s=float(wake_cfg.get("listening_window_seconds", 6)),
     )
 
+    # Wrap activate/deactivate so the UI hears about wake-word fires and
+    # listening-window expirations. No-op when ui_callback is None.
+    if ui_callback is not None:
+        _orig_activate = listening_state.activate
+        _orig_deactivate = listening_state.deactivate
+        _listening_window = float(wake_cfg.get("listening_window_seconds", 6))
+
+        def _activate(window_s: Optional[float] = None) -> None:
+            _orig_activate(window_s)
+            _emit("state.listening", window_s=window_s or _listening_window)
+
+        def _deactivate() -> None:
+            _orig_deactivate()
+            _emit("state.idle")
+
+        listening_state.activate = _activate  # type: ignore[method-assign]
+        listening_state.deactivate = _deactivate  # type: ignore[method-assign]
+
+    _emit("state.idle")
+
     wake_audio_q: Optional["asyncio.Queue[np.ndarray]"] = None
     wake_detector: Optional[WakeWordDetector] = None
     if wake_enabled:
@@ -216,6 +256,8 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
 
             def execute_command(func_name: str, args: tuple) -> None:
                 """Execute a matched command, respecting the wake-word gate."""
+                if paused is not None and paused.is_set():
+                    return
                 if not listening_state.is_active():
                     logger.debug("Command '%s' suppressed - wake word not active", func_name)
                     try:
@@ -227,6 +269,7 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
                 # Refresh window so multi-step interactions work without re-waking.
                 listening_state.activate()
                 func = actions.resolve_handler(func_name)
+                _emit("match", action=func_name, text="", args=args)
                 if callable(func):
                     func(*args)
 
@@ -252,7 +295,15 @@ async def run_assistant(opts: Any, config: Optional[dict] = None):
             tasks = [
                 asyncio.create_task(vad.run(), name="vad"),
                 asyncio.create_task(whisper.run(), name="whisper"),
-                asyncio.create_task(dispatch_command(text_q, listening_state=listening_state), name="matcher"),
+                asyncio.create_task(
+                    dispatch_command(
+                        text_q,
+                        listening_state=listening_state,
+                        ui_callback=ui_callback,
+                        paused=paused,
+                    ),
+                    name="matcher",
+                ),
                 asyncio.create_task(print_metrics_loop(30), name="metrics_printer"),
             ]
 

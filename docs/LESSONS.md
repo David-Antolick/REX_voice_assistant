@@ -17,6 +17,95 @@ Format:
 
 ---
 
+## Chromium tears down its UIA tree when its window isn't foreground — and you can't programmatically force a rebuild
+
+**Symptom:** Discord voice commands (`mute`, `deafen`, `leave channel`) work
+fine when Discord is the active window, but the moment Discord is minimized
+or fully covered, every UIA call returns `ElementNotFoundError`. Even after
+restoring the window, the buttons sometimes don't come back until the user
+physically clicks Discord.
+
+**Root cause:** Chromium suspends its accessibility tree as a memory
+optimization whenever its window isn't actively the foreground. The trigger
+is "this window isn't visible to a user right now" — combining iconic state,
+the `CalculateNativeWinOcclusion` feature, and not-foreground detection. The
+tree is reconstructed on demand, but **only when Chromium decides
+assistive technology is querying the window** — and there's no reliable
+programmatic signal that triggers that decision on modern Chromium.
+
+**Fix:** None that's purely in-code. Two real escape hatches:
+
+1. **Launch Discord with `--force-renderer-accessibility`.** Forces the
+   accessibility tree to stay alive permanently regardless of window state.
+   Cost: user has to edit their Discord shortcut once.
+2. **Add explicit `show discord` / `minimize discord` voice commands**
+   ([rex_main/actions/discord.py](../rex_main/actions/discord.py)) so the
+   user can drive window state, plus accept that mute/deafen require Discord
+   to currently be foreground or be launched with the flag above. After
+   `show discord`, a single user click on Discord reliably wakes the tree.
+
+**Things we tried that did NOT work** (all confirmed empirically — saving
+future-us the time):
+
+- `SW_SHOWNOACTIVATE` to restore without focus theft → window restores
+  visually but Chromium leaves the tree torn down (renderer never wakes).
+- `SW_RESTORE` (with focus) → Win32 focus rules prevent a non-foreground
+  process from genuinely making Discord foreground; renderer often still
+  doesn't wake.
+- `AttachThreadInput` trick (merge thread input with the foreground thread
+  to bypass focus restrictions) → didn't help; Chromium still didn't
+  rebuild the tree.
+- `BringWindowToTop` + `SetForegroundWindow` combination → same as above.
+- Move-window-off-screen pattern (`SetWindowPos` to `(-10000, -10000)` with
+  `SWP_NOACTIVATE`) → Chromium's `CalculateNativeWinOcclusion` detects
+  out-of-bounds windows as occluded and tears down the tree. `IsWindowVisible`
+  returns `True`, but the tree is gone anyway.
+- `SendMessage(WM_GETOBJECT, 0, 1)` to the top-level window — the classic
+  AutoHotkey-community trick. Does not work on current Chromium because the
+  trick required sending the message to a `Chrome_RenderWidgetHostHWND` child
+  window that no longer exists; modern Chromium consolidated rendering into
+  a single `Intermediate D3D Window` child that doesn't dispatch to the
+  renderer for accessibility queries.
+- `WM_GETOBJECT` with `OBJID_CLIENT` (-4) and `OBJID_NATIVEOM` (-16) on both
+  the top-level and the D3D child — Chromium responds with non-zero values
+  for some variants but doesn't rebuild the tree.
+- Polling `child_window().wrapper_object()` for the Deafen anchor button up
+  to 2 seconds after restore → the tree never rebuilds within the timeout
+  on its own.
+
+**The only programmatic signals that DO work:**
+
+- `--force-renderer-accessibility[=basic|complete]` at Chromium/Electron
+  launch. Permanent tree, no in-code workaround needed. The Chromium
+  accessibility team's documented official path.
+- A real user mouse click on the Chromium window. Mouse-input WinEvents
+  reach the renderer process and trigger Chromium's "AT might be present"
+  heuristic. Synthesized clicks via `SendInput` can theoretically substitute
+  but require focus, which loops back to the original problem.
+
+**Lesson:** When automating an Electron / Chromium-based app via UIA,
+assume the accessibility tree is **only valid while the window is foreground
+or while `--force-renderer-accessibility` is set**. Build the integration
+around that constraint from day one, not against it. If the user needs to
+control the app while it's minimized or in the background, either ship
+explicit window-state voice commands (so the user surfaces the window before
+issuing commands) or document the launch flag as a setup step. Don't burn
+hours rediscovering that Chromium is unwilling to be tricked.
+
+This applies to: Discord, Slack, VS Code, Microsoft Teams, OBS Studio
+(post-Electron transition), and any other Electron app. Same teardown
+behavior, same exhausted toolbox of workarounds.
+
+**See also:** [DECISIONS.md "Discord voice control via UIA"](DECISIONS.md#2026-04-27--discord-voice-control-via-uia-not-rpc-not-keystrokes),
+[rex_main/actions/discord.py](../rex_main/actions/discord.py) (current
+shipping shape — explicit `show` / `minimize` actions, no auto-restore
+heuristics), [_local/wm_getobject_experiment.py](../_local/wm_getobject_experiment.py)
+and [_local/offscreen_experiment.py](../_local/offscreen_experiment.py)
+(reproductions of the failed approaches, kept for future re-verification
+if Chromium's behavior ever changes).
+
+---
+
 ## Windows `localhost` is IPv6-first → ~2s hang per HTTP call
 
 **Symptom:** Every voice command on YTMD took 2–3 seconds end-to-end on

@@ -73,6 +73,8 @@ _rebuild()
 async def dispatch_command(
     text_queue: "asyncio.Queue[str]",
     listening_state: "Optional[ListeningState]" = None,
+    ui_callback: "Optional[Callable[..., None]]" = None,
+    paused: "Optional[Any]" = None,
 ):
     """Forever task that reads recognised text and triggers handlers."""
     logger.info("dispatch_command started - awaiting recognized text")
@@ -80,6 +82,10 @@ async def dispatch_command(
     while True:
         text = (await text_queue.get()).strip()
         logger.debug("Received text: %s", text)
+
+        if paused is not None and paused.is_set():
+            text_queue.task_done()
+            continue
 
         matched = False
         for pattern, action_name, handler in _DISPATCH_TABLE:
@@ -94,12 +100,22 @@ async def dispatch_command(
                     listening_state.activate()
                 logger.info("Matched action '%s'", action_name)
                 metrics.record_command_match(action_name, matched=True)
+                if ui_callback is not None:
+                    try:
+                        ui_callback("match", action=action_name, text=text, args=m.groups())
+                    except Exception:
+                        logger.exception("ui_callback raised on match event")
                 _invoke(action_name, handler, m.groups())
                 break
 
         if not matched:
             logger.debug("No command matched for input: %r", text)
             metrics.record_command_match(None, matched=False)
+            if ui_callback is not None:
+                try:
+                    ui_callback("no_match", text=text)
+                except Exception:
+                    logger.exception("ui_callback raised on no_match event")
 
         text_queue.task_done()
 

@@ -1,5 +1,57 @@
 # REX Voice Assistant - Changelog
 
+## [1.2.0] - 2026-04-30
+
+REX gets a real desktop UI. The default `rex` command now opens a system-tray app — the CLI is no longer the only surface. Settings live in a window, recognized commands flash a transient HUD, and Rex can launch and close YouTube Music / Spotify by voice. The console mode is preserved as `rex --console` for debugging and headless runs.
+
+### New Features
+
+#### Desktop UI (system tray + recognition HUD + settings dialog)
+- New `rex_main/ui/` package built on **PySide6**. Three surfaces: a state-driven system-tray icon, a transient frameless HUD that flashes the recognized command (✓ skip song / "didn't catch that"), and a tabbed settings window that mirrors `default_config.yaml`.
+- The HUD is click-through on Windows (sets `WS_EX_TRANSPARENT` via ctypes after first show) so it can't eat clicks during gameplay.
+- Tray icon glyph encodes runtime state — idle / listening / thinking / paused / error — with a small badge over your `rex_icon.png` artwork. Tooltip uses the assistant's name ("Rex — listening", not "REX — listening").
+- Right-click tray menu: **Pause / Resume Listening**, **Settings…**, **Restart Rex**, **Open logs folder**, **About**, **Quit**.
+- "Restart Rex" (and the auto-prompt that fires when settings save a restart-required field) tear down the assistant runtime thread and spawn a fresh one without ever taking the tray icon down. No more quit-and-relaunch cycle to apply config changes.
+- Settings dialog ships **Apply gaming preset** and **Apply default preset** buttons that mirror the `--gaming` CLI flag in form-field form. Music-service changes (`services.active`) apply live via `configure_from_config`; everything else prompts for a restart.
+
+#### Windowed launcher (`rex-gui`)
+- New `[project.gui-scripts]` entry point produces `rex-gui.exe` linked against `pythonw.exe`. Pin it to Start menu / Taskbar / Startup to launch Rex into the tray with **no terminal window**. The console-style `rex.exe` still exists for terminal use.
+
+#### `--console` flag
+- `rex` now defaults to launching the tray app. Add `--console` to get the previous in-terminal behavior (useful for debugging, headless servers, or scripts piping to logs).
+- Falls through to console mode automatically if PySide6 fails to import or the OS reports no system-tray support.
+
+#### App launch / close voice commands
+- New `apps` action backend ([rex_main/actions/apps.py](rex_main/actions/apps.py)) with four commands: open / close YouTube Music, open / close Spotify.
+- Three-tier launcher resolver: hardcoded paths → recursive Start menu shortcut search (resolved via PowerShell + `WScript.Shell`) → Windows' authoritative installed-apps catalog (`Get-StartApps` + `shell:AppsFolder\\<AppID>`). Result is cached per app for the session, so discovery is paid at most once. Catches Microsoft Store apps, Squirrel/Electron installers, and standard installs without configuration.
+- Close uses `taskkill /IM <name> /F /T` against a candidate list of image names — no extra runtime dependency.
+
+### Runtime hooks
+- `run_assistant(opts, config)` and `dispatch_command(text_q, listening_state)` gained two optional parameters: `ui_callback` (event sink for state / match / no_match) and `paused` (a `threading.Event`-like). Both no-op when absent, so console-mode behavior is byte-identical to 1.1.x. The tray runs the assistant on a worker `QThread` whose asyncio loop owns these callbacks; signals marshal back to the Qt main thread via auto-queued connections.
+
+### New runtime dependency
+- Added **`PySide6>=6.7,<7`** to base dependencies. Adds ~60 MB to the install. Acceptable next to torch + faster-whisper. LGPL.
+
+### Removed (carry-over from 1.1.0 → 1.2.0 unreleased work)
+
+#### Discord voice-control integration
+- The Discord backend (`rex_main/actions/discord.py`) and all five voice commands shipped in 1.1.0 (`mute`, `unmute`, `deafen`, `undeafen`, `leave channel`, plus the never-released `show discord` / `minimize discord`) are removed.
+- Reason: the user's group is migrating to a self-hosted Spacebar instance via the Fermi web client. Spacebar is open-source and Discord-API-compatible, scopes aren't whitelist-gated, and the web-app delivery model bypasses the Chromium accessibility-tree teardown that made the Discord integration unreliable when minimized. A future Spacebar backend will be designed in a separate workstream. See [docs/DECISIONS.md](docs/DECISIONS.md) entry "Removed Discord integration; future voice chat will target Spacebar/Fermi" for the full rationale.
+- `pywinauto>=0.6.8,<1` removed from base dependencies — it was added solely for the Discord UIA backend and has no other consumer in REX.
+- The published 1.1.0 wheel on PyPI is unchanged; users who want the Discord integration can pin `rex-voice-assistant==1.1.0`.
+
+### Documentation
+- New [docs/UI_PLAN.md](docs/UI_PLAN.md) — vision document for the desktop UI: v1 scope, deferred features (command history, mic test, push-to-talk capture), v1.x and v2 sketches.
+- [docs/DECISIONS.md](docs/DECISIONS.md): new entry "Desktop UI v1: PySide6 tray + HUD + settings, in-process with asyncio in a QThread" recording the toolkit choice and integration model. The two prior Discord-related entries are **kept** — the negative-result trail still applies to any future Electron-app integration.
+- [docs/LESSONS.md](docs/LESSONS.md) "Chromium tears down its UIA tree when its window isn't foreground" entry is also **kept** for the same reason.
+- [docs/ACTIONS.md](docs/ACTIONS.md): new `apps` backend section in the inventory.
+
+### Tests
+- New `test_ui_bridge.py` covers the runtime → Qt-signal adapter using `QSignalSpy`. Skips cleanly on environments without PySide6 so the existing CI matrix doesn't have to install Qt.
+- The action-registry test gate (`test_actions.py`) still passes 174 assertions including the four new app-launch actions and the additive `dispatch_command` signature change.
+
+## [Unreleased]
+
 ## [1.1.0] - 2026-04-28
 
 Discord voice control. REX can now mute, unmute, deafen, undeafen, and disconnect from a Discord voice channel via voice command — without keystrokes, without Discord's whitelisted RPC scopes, and without disrupting other apps. The integration drives Discord's UI through the OS accessibility surface.

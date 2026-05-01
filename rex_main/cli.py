@@ -63,8 +63,9 @@ console = Console()
 @click.option("--wake-word/--no-wake-word", "wake_word", default=None, help="Enable wake-word gating (overrides config)")
 @click.option("--wake-model", default=None, help="Wake-word model name or path (e.g. 'hey_rex', 'hey_jarvis', or a local .onnx). Overrides config.")
 @click.option("--gaming", is_flag=True, help="Gaming preset: tiny.en + CPU + hey_rex wake word + low latency. Frees the GPU.")
+@click.option("--console", "console_mode", is_flag=True, help="Run in console mode (no tray UI). Useful for debugging or headless environments.")
 @click.pass_context
-def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Optional[str], debug: bool, dashboard: bool, dashboard_port: int, low_latency: bool, wake_word: Optional[bool], wake_model: Optional[str], gaming: bool):
+def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Optional[str], debug: bool, dashboard: bool, dashboard_port: int, low_latency: bool, wake_word: Optional[bool], wake_model: Optional[str], gaming: bool, console_mode: bool):
     """REX - Voice-controlled music assistant.
 
     Run without a subcommand to start the voice assistant.
@@ -97,6 +98,7 @@ def cli(ctx: click.Context, model: str, device: str, beam: int, log_file: Option
     ctx.obj["low_latency"] = low_latency
     ctx.obj["wake_word"] = wake_word
     ctx.obj["wake_model"] = wake_model
+    ctx.obj["console"] = console_mode
 
     # If no subcommand, run the assistant
     if ctx.invoked_subcommand is None:
@@ -143,21 +145,61 @@ def run(ctx: click.Context):
         else:
             console.print("[yellow]Dashboard failed to start (may already be running)[/yellow]")
 
-    # Import and run main
-    from rex_main.rex import run_assistant
+    use_console = bool(ctx.obj.get("console", False))
 
-    try:
-        asyncio.run(run_assistant(opts, config))
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted by user[/yellow]")
-        # Stop dashboard if running
-        if opts.dashboard:
-            try:
-                from rex_main.dashboard import stop_dashboard
-                stop_dashboard()
-            except Exception:
-                pass
+    if use_console:
+        from rex_main.rex import run_assistant
+
+        try:
+            asyncio.run(run_assistant(opts, config))
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted by user[/yellow]")
+        finally:
+            if opts.dashboard:
+                try:
+                    from rex_main.dashboard import stop_dashboard
+                    stop_dashboard()
+                except Exception:
+                    pass
         sys.exit(0)
+    else:
+        try:
+            from rex_main.ui import launch_tray_app
+        except ImportError as exc:
+            console.print(
+                "[yellow]Desktop UI unavailable ({err}). "
+                "Run 'pip install -e .' (or 'pip install PySide6') to enable the tray app, "
+                "or use 'rex --console' to skip it.[/yellow]\n"
+                "[cyan]Falling back to console mode...[/cyan]".format(err=exc)
+            )
+            from rex_main.rex import run_assistant
+
+            try:
+                asyncio.run(run_assistant(opts, config))
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Interrupted by user[/yellow]")
+            finally:
+                if opts.dashboard:
+                    try:
+                        from rex_main.dashboard import stop_dashboard
+                        stop_dashboard()
+                    except Exception:
+                        pass
+            sys.exit(0)
+
+        console.print("[cyan]Starting Rex (tray UI). Use --console to run without it.[/cyan]")
+        try:
+            rc = launch_tray_app(opts, config)
+        except KeyboardInterrupt:
+            rc = 0
+        finally:
+            if opts.dashboard:
+                try:
+                    from rex_main.dashboard import stop_dashboard
+                    stop_dashboard()
+                except Exception:
+                    pass
+        sys.exit(rc)
 
 
 @cli.command()
@@ -606,6 +648,23 @@ def migrate(from_env: bool):
 
 def main():
     """Entry point for the rex command."""
+    cli()
+
+
+def main_gui():
+    """Entry point for the windowed `rex-gui` command (no console window).
+
+    Registered as a [project.gui-scripts] entry so setuptools links it
+    against pythonw.exe on Windows. Pin the resulting rex-gui.exe to
+    Start menu / Taskbar / Startup to launch REX without a terminal.
+    """
+    # pythonw.exe gives us None for stdout/stderr, which Rich and click
+    # both choke on. Redirect to /dev/null-ish so any stray prints don't
+    # crash the launcher.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")  # type: ignore[assignment]
     cli()
 
 

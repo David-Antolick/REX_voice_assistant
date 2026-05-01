@@ -14,7 +14,7 @@ import logging
 
 from rex_main.actions.registry import set_active_backends
 from rex_main.actions.service import configure_from_config
-from rex_main.actions.spotify import SpotifyClient, safe_call as _spotify_safe_call
+from rex_main.actions.spotify import SpotifyClient
 from rex_main.actions.ytmd import YTMD, safe_call
 
 logger = logging.getLogger(__name__)

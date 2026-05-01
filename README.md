@@ -7,7 +7,9 @@
 REX is a lightweight, streaming voice assistant that runs **100% locally** - no cloud APIs, no subscriptions. Control your music with your voice and capture gaming moments hands-free.
 
 **Features:**
+- **Desktop UI** - System tray icon, recognition HUD that flashes the matched command, settings dialog. No terminal needed.
 - **Music Control** - Play, pause, skip, search, and volume for YouTube Music Desktop or Spotify
+- **App Launch** - "open spotify", "close youtube music" — Rex finds installed apps via Windows' installed-apps catalog
 - **Screen Clipping** - Voice-activated clip saving with SteelSeries GG Moments ("clip that!")
 - **Fast & Private** - Whisper speech recognition runs locally on CPU or GPU
 - **Low Latency** - Early command detection means near-instant response
@@ -24,11 +26,15 @@ pip install rex-voice-assistant     # Or use pip directly
 # 2. Run the setup wizard
 rex setup
 
-# 3. Start REX
-rex
+# 3. Start Rex into the system tray
+rex            # tray UI (default)
+rex-gui        # same, but launched windowless (no terminal pops) — pin this to Start menu
+rex --console  # old in-terminal behavior, useful for debugging
 ```
 
 The setup wizard will guide you through configuring your music service and GPU acceleration.
+
+After `rex` starts, look in your system tray for the Rex icon. Right-click for **Settings**, **Pause Listening**, **Restart Rex**, and **Quit**. Recognized commands flash a transient HUD in the bottom-right of the active monitor.
 
 ---
 
@@ -48,7 +54,9 @@ The setup wizard will guide you through configuring your music service and GPU a
 ### CLI Commands
 
 ```bash
-rex              # Start the voice assistant
+rex              # Start Rex (tray UI by default)
+rex-gui          # Same as rex, but no terminal window — pin this to Start menu / Taskbar
+rex --console    # Console mode (in-terminal, useful for debugging or headless boxes)
 rex setup        # Interactive setup wizard
 rex settings     # Change model, services, and integrations
 rex status       # Show configuration and service connectivity
@@ -62,6 +70,7 @@ rex migrate --from-env  # Import settings from .env file
 
 **Options for `rex` command:**
 ```
+--console       Run in console mode (no tray UI). Useful for debugging or headless environments.
 --model         Whisper model (tiny|base|small|medium|large, default: small.en)
 --device        Force device (cuda|cpu, default: auto)
 --beam          Beam size for decoding (default: 1)
@@ -126,9 +135,8 @@ rex migrate --from-env  # Import settings from .env file
 | "switch to youtube music"         | Switch backend to YTMD      |
 | "like", "dislike"                 | Thumbs up/down current track|
 | "clip that", "save clip"          | Save clip (SteelSeries GG)  |
-| "mute", "unmute"                  | Discord mic mute toggle     |
-| "deafen", "undeafen"              | Discord deafen toggle       |
-| "leave channel"                   | Disconnect from Discord voice |
+| "open spotify", "open youtube music"   | Launch the desktop app  |
+| "close spotify", "close youtube music" | Force-close the app      |
 
 Add custom commands by editing `rex_main/matcher.py` and `rex_main/commands.py`.
 
@@ -299,10 +307,11 @@ python -m rex_main.rex --debug
 
 ### Roadmap
 
-- Custom "Hey Rex" wake-word model (prebuilt "hey jarvis" already supported via `[wake_word]` extra)
-- Discord integration (waiting for RPC API access)
-- Application controls (open/close apps)
-- Performance optimizations
+- Command history / log viewer in the desktop UI
+- Microphone test panel + push-to-talk binding capture in Settings
+- Per-app voice profiles (different command sets when a given window is focused)
+- Spacebar/Fermi voice-chat backend (replacement for the removed Discord integration)
+- See [docs/UI_PLAN.md](docs/UI_PLAN.md) for the full UI vision (v1 / v1.x / v2)
 
 ---
 
