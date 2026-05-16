@@ -139,6 +139,11 @@ rex migrate --from-env  # Import settings from .env file
 | "clip that", "save clip"          | Save clip (SteelSeries GG)  |
 | "open spotify", "open youtube music"   | Launch the desktop app  |
 | "close spotify", "close youtube music" | Force-close the app      |
+| "fullscreen", "captions", "theater"    | Toggle YouTube video display (YTVD) |
+| "speed 1.5", "playback speed 2"        | Set YouTube video playback rate (YTVD) |
+| "skip ahead 10", "rewind 30"           | Seek ± seconds in active playback (YTVD) |
+| "youtube search cat videos"            | Search YouTube on the video view (YTVD) |
+| "go to subscriptions", "show library"  | Navigate the YouTube video view (YTVD) |
 
 Add custom commands by editing `rex_main/matcher.py` and `rex_main/commands.py`.
 

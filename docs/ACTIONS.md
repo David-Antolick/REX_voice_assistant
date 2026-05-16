@@ -149,6 +149,41 @@ Phrases column shows the user-facing utterance, not the regex.
 
 Preconditions for all: YTMD desktop app running with Companion-Server enabled.
 
+### `ytvd` — YouTube Video + Music Desktop fork (slot: `None`, transport: `http_local`)
+
+Video-specific commands that talk to YTVD's new `/api/v1/playback/*` and
+`/api/v1/video/*` namespaces. Music-side commands continue to live in
+`ytmd.py` — YTVD preserves the original `/api/v1/command` endpoint
+unchanged, so existing YTMD actions keep working when the user runs
+YTVD instead. Always-on (slot=None) because these don't compete with
+any other backend.
+
+| Action | Capability | Phrases | Args | Side effects |
+|---|---|---|---|---|
+| `ytvd_toggle_fullscreen` | `toggle_fullscreen` | "fullscreen", "full screen", "toggle fullscreen" | — | `video_fullscreen` |
+| `ytvd_toggle_captions` | `toggle_captions` | "captions", "subtitles", "toggle captions" | — | `video_captions` |
+| `ytvd_toggle_theater` | `toggle_theater` | "theater", "theater mode", "toggle theater" | — | `video_theater` |
+| `ytvd_set_playback_rate` | `set_playback_rate` | "speed 1.5", "playback speed 2", "set speed to 1" | `rate:str` | `video_playback_rate` |
+| `ytvd_seek_forward` | `seek_forward` | "skip ahead 10", "jump forward 30", "fast forward 5" | `seconds:int` | `track_position` |
+| `ytvd_seek_back` | `seek_back` | "skip back 10", "rewind 30", "jump back 5" | `seconds:int` | `track_position` |
+| `ytvd_search_youtube` | `search_youtube` | "youtube search cat videos" | `query:str` | `video_url` |
+| `ytvd_navigate` | `navigate` | "go to home / subscriptions / library", "show library" | `dest:enum` | `video_url` |
+
+Preconditions for all: YTVD desktop app running with Companion-Server
+enabled. Reuses `YTMD_HOST` / `YTMD_PORT` / `YTMD_TOKEN`.
+
+The toggle commands (`toggleFullscreen` / `toggleCaptions` /
+`toggleTheater`) are implemented server-side by YTVD sending `f` / `c`
+/ `t` keypresses to the video webContents — they no-op on
+`youtube.com/` (home page). `search` and `navigate` change the video
+view's URL but don't auto-show the video view; switch to it via the
+title-bar toggle or tray if music is currently visible.
+
+Not yet wireable (deferred in YTVD): like / dislike / subscribe,
+miniplayer, captions language, quality, chapters, queue. See
+[YTVD_COMPANION_API.md](YTVD_COMPANION_API.md) for the current command
+list.
+
 ### `spotify` — Spotify Web API + Connect (slot: `music`, transport: `oauth_cloud`)
 
 | Action | Capability | Phrases | Args | Side effects |
