@@ -22,7 +22,8 @@ secrets.yaml
 # IDE / editor
 .vscode/
 .idea/
-.claude/
+.claude/*
+!.claude/skills/
 
 # Local cached models (Whisper, etc.)
 models/

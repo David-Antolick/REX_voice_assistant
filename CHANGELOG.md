@@ -1,5 +1,41 @@
 # REX Voice Assistant - Changelog
 
+## [1.3.0] - 2026-05-16
+
+Voice control for the **YTVD** fork (YouTube Video + Music Desktop). Music-side commands are unchanged — YTVD preserves YTMD's `/api/v1/command` namespace and reuses the same auth token / env vars — so existing `ytmd_*` actions keep working on YTVD installs without re-auth or config changes. What's new is the video side: REX now drives YTVD's `/api/v1/playback/*` and `/api/v1/video/*` namespaces directly.
+
+### New Features
+
+#### YTVD video-control voice commands
+- New `ytvd` action backend ([rex_main/actions/ytvd.py](rex_main/actions/ytvd.py)) with eight commands across the two new YTVD namespaces:
+  - **Display toggles** (`/api/v1/video/command`): "fullscreen" / "full screen", "captions" / "subtitles", "theater" / "theater mode". Each accepts an optional "toggle" prefix.
+  - **Playback rate** (`/api/v1/video/command setPlaybackRate`): "speed 1.5", "playback speed 2", "set speed to 1". Server-side clamped to YouTube's 0.25–2.0 range.
+  - **Seek relative** (`/api/v1/playback/command seekRelative`): "skip ahead 10", "jump forward 30", "fast forward 5" forward; "skip back 10", "rewind 30", "jump back 5", "go back 15" backward. Operates on whichever view owns the audio bus (source-agnostic).
+  - **YouTube search** (`/api/v1/video/command search`): "youtube search cat videos". Phrasing is `"youtube search …"` not `"search youtube …"` to avoid colliding with the existing `ytmd_search_song` pattern.
+  - **Navigation** (`/api/v1/video/command navigate`): "go to home / subscriptions / library", "show subscriptions / library".
+- Backend is `slot=None` (always-on) — these don't compete with any other action, and the `music` slot is still owned by `ytmd` or `spotify` per existing routing.
+- Server-side caveats documented in [docs/ACTIONS.md](docs/ACTIONS.md): toggle commands are implemented as `f` / `c` / `t` keypresses to the video webContents and no-op on YouTube's home page (no player loaded); `search` / `navigate` change the URL but don't auto-show the video view, so a user on the music view has to flip via title-bar toggle to see results. Both are YTVD-side polish items (Phase 3).
+
+#### Engagement / quality / chapter commands deferred
+- `like` / `dislike` / `subscribe` / `removeRating` / `setQuality` / `nextChapter` / `previousChapter` / `addToQueue` / `addToWatchLater` / `toggleMiniplayer` / `setCaptionLang` are **not yet wired**. YTVD's `/api/v1/video/command` Type.Union doesn't accept them yet — DOM-selector work is outstanding on the YTVD side. Will land when YTVD ships them. Tracked in [docs/ACTIONS.md](docs/ACTIONS.md) ytvd section under "Not yet wireable" and in [docs/YTVD_COMPANION_API.md](docs/YTVD_COMPANION_API.md).
+
+### Migration notes
+
+#### Upgrading from YTMD to YTVD
+- YTVD reuses YTMD's port (9863), token format, and env vars (`YTMD_HOST` / `YTMD_PORT` / `YTMD_TOKEN`), so config and keyring slots transfer untouched.
+- The companion-server auth grant does NOT transfer — YTVD is a separate install and never saw the original grant. Re-run `rex setup` once and click Allow in YTVD's popup; the new token overwrites the stale `ytmd_token` slot in keyring.
+- The setup wizard still labels the step "YTMD" because the slot name in keyring and the env vars are unchanged; cosmetic rename is a follow-up.
+
+### Documentation
+- New [docs/YTVD_COMPANION_API.md](docs/YTVD_COMPANION_API.md) — focused API reference for the new `/playback/*` and `/video/*` namespaces, including which voice intents map to which endpoint, the source-coordinator audio-bus model, and the not-yet-implemented command list.
+- [docs/ACTIONS.md](docs/ACTIONS.md): new `ytvd` backend section in the inventory (eight actions, all `slot=None`, transport `http_local`).
+- [docs/DECISIONS.md](docs/DECISIONS.md): new entry "New `ytvd` backend (separate file) for YouTube Video + Music desktop fork" — records why ytvd is its own module despite shared auth with ytmd, why `slot=None`, and why search phrasing is `"youtube search …"` not `"search youtube …"`.
+- [docs/LESSONS.md](docs/LESSONS.md): new entry "Wake-word listening window vs Whisper latency" — debugging trail from the post-rollout "GUI doesn't see the new commands" symptom, which turned out to be Whisper-`medium`-on-CPU latency eating the 6 s wake gate before the command transcription returned. The actions were fine; the model was wrong for live dispatch.
+- [README.md](README.md) commands table updated with the eight new YTVD video phrases.
+
+### Tests
+- `test_actions.py` gate passes 221 assertions including the eight new YTVD actions (regex compiles, examples match, ArgSpec ↔ capture-group count, no intra-backend collisions) and the perf ceilings (dispatch 2.3 µs / 50 µs, registry 0.05 µs / 5 µs, rebuild 0.01 ms / 50 ms).
+
 ## [1.2.0] - 2026-04-30
 
 REX gets a real desktop UI. The default `rex` command now opens a system-tray app — the CLI is no longer the only surface. Settings live in a window, recognized commands flash a transient HUD, and Rex can launch and close YouTube Music / Spotify by voice. The console mode is preserved as `rex --console` for debugging and headless runs.

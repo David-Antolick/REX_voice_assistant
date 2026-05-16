@@ -18,6 +18,100 @@ Format:
 
 ---
 
+## 2026-05-16 — New `ytvd` backend (separate file) for YouTube Video + Music desktop fork
+
+**Context:** The user moved from YTMD to **YTVD** — a fork that adds a
+real video view alongside the existing music view. YTVD keeps YTMD's
+companion-server on the same port and reuses the same auth token /
+env vars (`YTMD_HOST` / `YTMD_PORT` / `YTMD_TOKEN`), but exposes two
+**new** namespaces: `/api/v1/playback/*` (source-agnostic — acts on
+whichever view owns the audio bus) and `/api/v1/video/*` (video-only
+controls: fullscreen, captions, theater, playback rate, search,
+navigate). The legacy `/api/v1/command` namespace is preserved
+unchanged so existing `ytmd.py` actions keep working. Full reference
+in [YTVD_COMPANION_API.md](YTVD_COMPANION_API.md).
+
+**Decision:**
+
+- **New file [rex_main/actions/ytvd.py](../rex_main/actions/ytvd.py)** for
+  the video-side actions (one per the eight commands YTVD currently
+  implements server-side). One file per backend per the action-registry
+  contract — even though YTVD shares port/token with YTMD, the
+  conceptual surface is different and grouping by *server route* keeps
+  responsibilities tidy.
+- **`slot=None` (always-on).** YTVD video controls don't compete with
+  any other backend, and the music slot is still owned by `ytmd` /
+  `spotify` per existing slot routing. A user running YTVD effectively
+  has *both* `ytmd_*` and `ytvd_*` actions live at once — the music
+  endpoint stays the same so this is fine.
+- **Distinct phrasing for the search verb.** YTVD's video search uses
+  `"youtube search <query>"`, NOT `"search youtube <query>"`. The
+  existing `ytmd_search_song` pattern (`^search …`) would otherwise
+  swallow `"search youtube cat videos"` as a song titled "youtube cat
+  videos". Putting `youtube` first sidesteps the collision and
+  pattern-order coupling.
+- **Engagement / chapter / quality actions deferred.** YTVD's
+  `/video/command` Type.Union doesn't include `like` / `dislike` /
+  `subscribe` / `nextChapter` / `setQuality` / `addToQueue` yet (DOM-
+  selector work is outstanding on the YTVD side). Those REX actions
+  will land when the corresponding YTVD command literals ship; until
+  then, attempting to wire them would be a phantom feature. Tracked in
+  [ACTIONS.md](ACTIONS.md) ytvd section under "Not yet wireable".
+
+**Alternatives considered:**
+
+- *Extend `ytmd.py` with the new methods.* Rejected: violates the
+  one-file-per-backend rule in [ACTIONS.md](ACTIONS.md), blurs the
+  YTMD/YTVD line, and conflates two distinct server-side
+  responsibilities (music namespace vs video namespace).
+- *Two files (`ytvd_playback.py` + `ytvd_video.py`)* mapping 1:1 to the
+  two new server routes. Rejected as over-split for 8 actions — both
+  routes are part of the same app and have the same auth surface. If
+  the video side later grows large (engagement + chapters + quality),
+  splitting is still cheap.
+- *Phrasing `"search youtube X"` and rely on registration order to
+  shadow `ytmd_search_song`.* Rejected: registration-order routing is
+  fragile and invisible; the test gate (`test_no_phrase_collision_*`)
+  only catches intra-backend collisions, not this cross-backend
+  ordering issue.
+- *Introduce a new `video` slot that competes with `music`.* Rejected:
+  the audio bus is shared by YTVD's `SourceCoordinator`, so the slot
+  model doesn't carry weight here — REX doesn't need to know which
+  view is foreground; the server routes the command appropriately.
+
+**Consequences:**
+
+- A user upgrading YTMD → YTVD must re-run the auth dance once
+  (`rex setup`) against YTVD's auth popup — the token format is
+  identical but YTVD is a separate install and never saw the original
+  grant. The setup wizard still labels the step "YTMD" since the slot
+  in keyring and env vars is unchanged; renaming the wizard copy is a
+  small follow-up.
+- Search/navigate commands change the video view's URL but don't
+  auto-show the video view — that auto-show feature is on YTVD's
+  Phase 3 polish list. If music is currently visible, the user has
+  to flip via title-bar toggle / tray to see the result.
+- `toggleFullscreen` / `toggleCaptions` / `toggleTheater` server-side
+  are implemented as `f` / `c` / `t` keypresses to the video
+  webContents — they're no-ops on `youtube.com/` (home page) where
+  no player is loaded. Acceptable; documented in
+  [ACTIONS.md](ACTIONS.md).
+- The `next` / `previous` REX actions stay in `ytmd.py` for now.
+  YTVD's video preload doesn't have a "next video" implementation yet,
+  so `/playback/command` doesn't accept `next`/`previous`. When that
+  ships, those actions should be moved out of `ytmd.py` into a generic
+  playback module per the
+  [YTVD_COMPANION_API.md "Open questions"](YTVD_COMPANION_API.md#open-questions--follow-ups)
+  follow-up.
+
+**See also:** [YTVD_COMPANION_API.md](YTVD_COMPANION_API.md),
+[ACTIONS.md](ACTIONS.md) ytvd inventory section,
+[rex_main/actions/ytvd.py](../rex_main/actions/ytvd.py),
+[LESSONS.md](LESSONS.md) "Wake-word listening window vs Whisper
+latency".
+
+---
+
 ## 2026-04-28 — Desktop UI v1: PySide6 tray + HUD + settings, in-process with asyncio in a QThread
 
 **Context:** REX has lived in the terminal since launch. The vision

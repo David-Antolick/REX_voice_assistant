@@ -17,6 +17,101 @@ Format:
 
 ---
 
+## Wake-word listening window vs Whisper latency — `medium` on CPU eats the entire 6s gate before the command arrives
+
+**Symptom:** New `ytvd_*` voice actions appeared "broken" in the tray:
+say `"hey rex"` then `"fullscreen"`, nothing happens. Same with
+`"play music"` — a long-known-working action. Tray was a fresh
+process. Restart didn't help.
+
+**Root cause:** Not the actions. The chain was working; the wake-word
+gate was closing before the command's transcription arrived. Detailed
+trace from `--debug` logs:
+
+```
+00:37:11  WakeWord fired
+00:37:20  FastVAD flushing utterance: 20 frames (~0.64 s)   ← 'hey, rex.'
+00:37:25  No command matched: 'hey, rex.'                   ← only the wake phrase
+00:37:38  WakeWord fired again
+00:37:45  FastVAD flushing utterance: 23 frames (~0.74 s)   ← 'hey, rex.' again
+00:37:49  FastVAD flushing 8-frame  (~0.26 s) utterance     ← dropped (<min_speech)
+00:37:54  FastVAD flushing 4-frame  (~0.13 s) utterance     ← dropped
+…
+00:41:41  Early transcription: 'play music.'
+00:41:41  Suppressed early match 'ytmd_play_music' (wake word not active)
+```
+
+Two compounding things were happening:
+
+1. **Whisper `medium` on CPU returns transcriptions in ~4.5 s.** With
+   `wake_word.listening_window_seconds: 6`, that left ~1.5 s of usable
+   headroom — and any speak-pause-speak pattern pushed the command's
+   transcription past the window. The `suppressed` log line is the
+   smoking gun: matcher found `ytmd_play_music` for text `'play
+   music.'`, but the wake-word gate had already closed (the gate
+   doesn't auto-extend on each wake fire — only on each *matched*
+   command).
+2. **FastVAD's `min_speech=300ms` filter silently drops short
+   utterances.** Saying `"fullscreen"` quickly produces ~250 ms of
+   speech, gets flushed as a too-short utterance, never transcribed.
+   Saying `"hey rex"` slowly and then `"fullscreen"` produces two
+   utterances — the wake one transcribes, the command one is below
+   the floor and disappears. There is no log line at INFO level
+   telling you this happened — only the `~0.13 s` frame-count line
+   at DEBUG.
+
+**Fix:** Switch the user's config to the equivalent of `--gaming` mode
+(`model.name: tiny.en`, `model.device: cpu`). `tiny.en` on CPU returns
+in ~200–500 ms, so the existing 6 s window has order-of-magnitude
+slack and chained commands work without re-waking.
+
+```yaml
+model:
+  name: tiny.en     # was: medium
+  device: cpu       # was: auto
+```
+
+Whisper `medium` is the wrong model for live command dispatch
+regardless of device — its tail latency on CPU is what bites, but
+even on GPU the cold-load and warm cycle is heavier than the task
+needs. Commands are short and constrained; `tiny.en` is accurate
+enough.
+
+**Lesson:**
+
+- **A wake-gated voice assistant has a Whisper-latency budget**:
+  `Whisper(p99) + 1×command_speech ≤ listening_window_seconds` or
+  commands get suppressed silently. With `medium` on CPU, p99 is
+  ~5 s — the gate must be ≥10 s, or the model must change.
+- **When commands don't match, the first question is "did the
+  transcription reach the matcher inside the window?"**, not "is the
+  regex right?". The `Suppressed: N` counter in the metrics printout
+  is the cheapest signal that the gate closed too early — if it's
+  non-zero while `Commands: 0`, the gate is the problem. `--debug`
+  also adds the `Suppressed early match '<name>' from '<text>' (wake
+  word not active)` line which names the regex that *would* have
+  matched.
+- **FastVAD's `min_speech=300ms` is a silent killer for one-word
+  commands** said in isolation. Any future short-command additions
+  (`"home"`, `"sub"`, `"like"`) need to either be said with
+  enough pre/post padding to clear 300 ms, or the floor needs to
+  drop. Keep the floor; coach users / docs to say wake + command in
+  one breath.
+- **The matcher logging is DEBUG-level.** "No command matched" and
+  "Received text" are both invisible at INFO. When diagnosing dispatch,
+  always relaunch with `--debug` first. Without it you're looking at
+  wake counts and an empty match counter and inventing theories.
+
+**See also:** [DECISIONS.md "New `ytvd` backend"](DECISIONS.md#2026-05-16--new-ytvd-backend-separate-file-for-youtube-video--music-desktop-fork)
+(where this lesson surfaced),
+[rex_main/fast_vad.py](../rex_main/fast_vad.py) (the `min_speech` /
+`silence` knobs),
+[rex_main/matcher.py](../rex_main/matcher.py) (`dispatch_command` —
+DEBUG-level "Received text" and "No command matched" lines),
+[rex_main/metrics.py](../rex_main/metrics.py) (`Suppressed:` counter).
+
+---
+
 ## Chromium tears down its UIA tree when its window isn't foreground — and you can't programmatically force a rebuild
 
 **Symptom:** Discord voice commands (`mute`, `deafen`, `leave channel`) work
