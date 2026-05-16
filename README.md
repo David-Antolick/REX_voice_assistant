@@ -34,7 +34,9 @@ rex --console  # old in-terminal behavior, useful for debugging
 
 The setup wizard will guide you through configuring your music service and GPU acceleration.
 
-After `rex` starts, look in your system tray for the Rex icon. Right-click for **Settings**, **Pause Listening**, **Restart Rex**, and **Quit**. Recognized commands flash a transient HUD in the bottom-right of the active monitor.
+After `rex` starts, look in your system tray for the Rex icon. Right-click for **Settings**, **Pause Listening**, **Restart Rex**, **Launch at Windows startup**, and **Quit**. Recognized commands flash a transient HUD in the bottom-right of the active monitor.
+
+The **Launch at Windows startup** toggle drops a shortcut into your Windows Startup folder, so REX boots into the tray with no terminal. The entry also appears under **Settings → Apps → Startup** if you prefer to manage it from there.
 
 ---
 

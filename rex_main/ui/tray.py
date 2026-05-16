@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Callable, Optional
@@ -27,6 +30,80 @@ _STATE_TOOLTIPS = {
     "paused": "Rex — paused",
     "error": "Rex — error",
 }
+
+
+_STARTUP_SHORTCUT_NAME = "Rex Voice Assistant.lnk"
+
+
+def _startup_dir() -> Optional[Path]:
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def _startup_shortcut_path() -> Optional[Path]:
+    d = _startup_dir()
+    return d / _STARTUP_SHORTCUT_NAME if d else None
+
+
+def _find_rex_gui_exe() -> Optional[Path]:
+    """Locate rex-gui.exe so the shortcut points at the windowless launcher."""
+    found = shutil.which("rex-gui.exe") or shutil.which("rex-gui")
+    if found:
+        return Path(found)
+    py_dir = Path(sys.executable).parent
+    for cand in (py_dir / "rex-gui.exe", py_dir / "Scripts" / "rex-gui.exe"):
+        if cand.exists():
+            return cand
+    return None
+
+
+def _ps_quote(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+
+def startup_shortcut_exists() -> bool:
+    p = _startup_shortcut_path()
+    return bool(p and p.exists())
+
+
+def enable_startup_shortcut() -> Path:
+    """Create the Startup-folder shortcut. Returns the .lnk path on success."""
+    if sys.platform != "win32":
+        raise RuntimeError("Startup shortcut is only supported on Windows.")
+    lnk = _startup_shortcut_path()
+    if lnk is None:
+        raise RuntimeError("Could not locate the user Startup folder (APPDATA missing).")
+    target = _find_rex_gui_exe()
+    if target is None:
+        raise RuntimeError(
+            "rex-gui.exe not found on PATH. Reinstall with `pip install -e .` "
+            "to register the windowless launcher."
+        )
+    lnk.parent.mkdir(parents=True, exist_ok=True)
+    ps = (
+        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + _ps_quote(str(lnk)) + "); "
+        "$s.TargetPath = " + _ps_quote(str(target)) + "; "
+        "$s.WorkingDirectory = " + _ps_quote(str(target.parent)) + "; "
+        "$s.WindowStyle = 7; "
+        "$s.Description = 'Rex Voice Assistant (tray)'; "
+        "$s.Save()"
+    )
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+        check=True,
+        creationflags=creationflags,
+        capture_output=True,
+    )
+    return lnk
+
+
+def disable_startup_shortcut() -> None:
+    lnk = _startup_shortcut_path()
+    if lnk and lnk.exists():
+        lnk.unlink()
 
 
 class RexTray(QObject):
@@ -70,6 +147,17 @@ class RexTray(QObject):
         action_logs.triggered.connect(self._open_logs)
         self._menu.addAction(action_logs)
 
+        self._action_startup = QAction("Launch at Windows startup", self._menu)
+        self._action_startup.setCheckable(True)
+        self._action_startup.setToolTip(
+            "Adds a shortcut to your Windows Startup folder. "
+            "You can also toggle this in Settings → Apps → Startup."
+        )
+        self._action_startup.triggered.connect(self._on_toggle_startup)
+        if sys.platform != "win32":
+            self._action_startup.setEnabled(False)
+        self._menu.addAction(self._action_startup)
+
         action_about = QAction("About Rex", self._menu)
         action_about.triggered.connect(self._show_about)
         self._menu.addAction(action_about)
@@ -81,6 +169,9 @@ class RexTray(QObject):
 
         self._tray.setContextMenu(self._menu)
         self._tray.activated.connect(self._on_activated)
+        # Refresh on menu open so Settings → Startup toggles or manual file edits
+        # stay reflected in the checkmark.
+        self._menu.aboutToShow.connect(self._refresh_startup_check)
 
         # Auto-return to idle after the listening window closes, since the
         # runtime emits state.idle only when something explicitly calls
@@ -131,6 +222,32 @@ class RexTray(QObject):
             self._idle_timer.stop()
             self._tray.setIcon(make_icon("paused"))
             self._tray.setToolTip(_STATE_TOOLTIPS["paused"])
+
+    def _refresh_startup_check(self) -> None:
+        if sys.platform != "win32":
+            return
+        self._action_startup.blockSignals(True)
+        try:
+            self._action_startup.setChecked(startup_shortcut_exists())
+        finally:
+            self._action_startup.blockSignals(False)
+
+    def _on_toggle_startup(self, checked: bool) -> None:
+        try:
+            if checked:
+                lnk = enable_startup_shortcut()
+                logger.info("Startup shortcut created at %s", lnk)
+            else:
+                disable_startup_shortcut()
+                logger.info("Startup shortcut removed")
+        except Exception as exc:
+            logger.exception("startup shortcut toggle failed")
+            QMessageBox.warning(
+                None,
+                "Rex — Startup shortcut",
+                f"Could not {'create' if checked else 'remove'} the Startup shortcut:\n\n{exc}",
+            )
+            self._refresh_startup_check()
 
     def _open_logs(self) -> None:
         log_path_str = self._config.get("logging", {}).get("file", "~/.rex/logs/rex.log")
