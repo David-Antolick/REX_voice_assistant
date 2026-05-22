@@ -19,9 +19,10 @@ REX is a lightweight, streaming voice assistant that runs **100% locally** - no 
 ### Quick Start
 
 ```powershell
-# 1. Install REX (choose one)
-pipx install rex-voice-assistant    # Recommended: isolated environment
-pip install rex-voice-assistant     # Or use pip directly
+# 1. Install REX (pick one)
+uv tool install rex-voice-assistant  # uv (recommended if you use uv)
+pipx install rex-voice-assistant     # pipx (also isolated, equivalent result)
+pip install rex-voice-assistant      # plain pip if you prefer
 
 # 2. Run the setup wizard
 rex setup
@@ -297,18 +298,35 @@ REX stores configuration in `~/.rex/`:
 
 ### Development
 
-```bash
-# Clone and install in development mode
+REX targets native Windows Python 3.12 (it depends on Windows-only surfaces: PySide6 tray, WASAPI capture, UIA, SteelSeries GameSense, `pythonw`-linked `rex-gui.exe`). Do not try to develop it from WSL.
+
+**Using uv (recommended):**
+
+```powershell
 git clone https://github.com/David-Antolick/rex_voice_assistant.git
 cd rex_voice_assistant
-pip install -e ".[dev]"
+uv venv --python 3.12
+uv pip install -e ".[dev]"
 
-# Run tests
-pytest
-
-# Run directly
-python -m rex_main.rex --debug
+uv run rex setup               # configure services + offer CUDA torch install
+uv run rex                     # tray UI
+uv run rex --console --debug   # in-terminal, verbose
+uv run pytest test_actions.py  # action-contract gate (run before commits)
+uv run pytest                  # full suite
 ```
+
+The repo ships a `uv.lock` for reproducible dev environments — `uv sync` resolves to the same versions on any machine.
+
+**Plain pip fallback:**
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pytest
+```
+
+**Releasing a new version:** see [docs/RELEASING.md](docs/RELEASING.md).
 
 ---
 
