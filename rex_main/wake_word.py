@@ -179,6 +179,7 @@ class WakeWordDetector:
         if self._model is not None or self._disabled:
             return
         try:
+            import openwakeword
             from openwakeword.model import Model
             from openwakeword.utils import download_models
         except ImportError:
@@ -191,7 +192,28 @@ class WakeWordDetector:
             self._disabled = True
             return
 
-        # Resolve the model identifier:
+        # OWW ships without its mel/embedding pre-processor ONNX files; they
+        # live in <site-packages>/openwakeword/resources/models/ and are
+        # fetched on first use. Every wake model (custom or prebuilt) needs
+        # them, so ensure they're present before any load attempt — otherwise
+        # the load fails with NO_SUCHFILE and the custom-model branch below
+        # would (incorrectly) blame the user's .onnx.
+        resources_dir = Path(openwakeword.__file__).parent / "resources" / "models"
+        preproc_required = ["melspectrogram.onnx", "embedding_model.onnx"]
+        if not all((resources_dir / name).exists() for name in preproc_required):
+            logger.info("Downloading openWakeWord pre-processor models (one-time, ~10MB)...")
+            try:
+                # Sentinel matches no prebuilt wakeword name, so download_models
+                # only fetches the always-on feature + VAD models (≈10MB), not
+                # the full ≈30MB prebuilt wakeword set we don't need here.
+                download_models(model_names=["_rex_preproc_only_"])
+            except Exception as exc:
+                logger.error("Failed to download OWW pre-processor models: %s. Gate disabled.", exc)
+                self.listening_state._gate_enabled = False
+                self._disabled = True
+                return
+
+        # Resolve the wake model identifier:
         # - file path (with ~ expansion) → used as-is
         # - REX-known alias like "hey_rex" → auto-download from HF and cache
         # - openWakeWord prebuilt name like "hey_jarvis" → passed through unchanged
@@ -208,12 +230,13 @@ class WakeWordDetector:
 
         if not _try_load():
             if is_custom:
-                # No point downloading prebuilt models; the user pointed at a missing file.
+                # Pre-processors are guaranteed present above, so a load failure
+                # here means the custom .onnx itself is broken or incompatible.
                 logger.error("Custom wake-word model not loadable: %s. Gate disabled.", model_arg)
                 self.listening_state._gate_enabled = False
                 self._disabled = True
                 return
-            logger.info("Downloading openWakeWord models (one-time, ~30MB)...")
+            logger.info("Downloading openWakeWord prebuilt wake models (one-time, ~30MB)...")
             try:
                 download_models()
             except Exception as exc:

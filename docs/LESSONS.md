@@ -17,6 +17,32 @@ Format:
 
 ---
 
+## openWakeWord ships without its mel/embedding pre-processors — the load error names *your* model, not the missing bundled file
+
+**Symptom:** Fresh `uv` venv. `uv run rex --gaming` boots cleanly through Whisper warmup, then on wake-word init:
+
+```
+WARNING rex_main.wake_word: Wake-word model load attempt failed: [ONNXRuntimeError] : 3 : NO_SUCHFILE :
+  Load model from C:\...\.venv\Lib\site-packages\openwakeword\resources\models\melspectrogram.onnx failed:
+  ... File doesn't exist
+ERROR rex_main.wake_word: Custom wake-word model not loadable: C:\Users\danto\.rex\wake_models\hey_rex.onnx. Gate disabled.
+```
+
+The error message blames `hey_rex.onnx` — the wake model that's actually fine. Felt like the uv install had a missing dep or the cached HF model was corrupt.
+
+**Root cause:** Two layers.
+
+1. **openWakeWord ships incomplete.** The PyPI wheel installs the Python code but *not* the `melspectrogram.onnx` / `embedding_model.onnx` pre-processor ONNX files those models rely on. Those live in `<site-packages>/openwakeword/resources/models/` and are fetched on first use by `openwakeword.utils.download_models()`. The directory doesn't even exist until that call runs. Every wake model — custom or prebuilt — depends on these pre-processors.
+2. **`wake_word.py` mis-blamed the wrong file.** Old `_lazy_init` flow: try to load the wake model; if it fails *and* `is_custom` (i.e. the resolved path exists on disk), early-return with "custom model not loadable" and disable the gate. The early-return assumed `is_custom` ⇒ "the custom file is missing/broken." But `is_custom` was True (the cached `hey_rex.onnx` *was* there); the actual failure was the missing pre-processor inside openwakeword's site-packages. The `download_models()` fallback that would have fixed it was skipped because the early-return ran first.
+
+**Fix:** Proactive ensure in [rex_main/wake_word.py](../rex_main/wake_word.py) `_lazy_init`. Before any load attempt, check whether `melspectrogram.onnx` and `embedding_model.onnx` exist under `<openwakeword pkg>/resources/models/`. If not, call `download_models(model_names=["_rex_preproc_only_"])` — the sentinel matches no prebuilt wake-word name, so the function's `always download feature + VAD` blocks run and the ~30 MB prebuilt-wakeword set is skipped. Only the ~5 MB of pre-processors REX actually needs gets fetched. The `is_custom` early-return stays in the post-load failure path; now it correctly means "your `.onnx` itself is broken" instead of mis-blaming.
+
+**Lesson:** "Library is installed" ≠ "library is ready to run." Some packages bundle code but lazily fetch supporting data files on first use, and the install-time check (`import openwakeword` succeeds, `openwakeword.__file__` resolves) won't tell you the runtime payload is missing. When wrapping that kind of library, never let your *load-failure* classification logic short-circuit before you've ensured the library's own first-run dependencies are in place — or your error message will confidently name the wrong culprit. Also: this bites *both* venvs equally. Same fix path applies whether REX is launched via `uv run rex` (project `.venv`) or bare `rex` (the `uv tool` install at `~\.local\bin\`). The auto-ensure runs the first time each venv hits `_lazy_init`.
+
+**See also:** [rex_main/wake_word.py](../rex_main/wake_word.py) `_lazy_init`; openwakeword's `download_models()` in `openwakeword/utils.py`.
+
+---
+
 ## Wake-word listening window vs Whisper latency — `medium` on CPU eats the entire 6s gate before the command arrives
 
 **Symptom:** New `ytvd_*` voice actions appeared "broken" in the tray:
