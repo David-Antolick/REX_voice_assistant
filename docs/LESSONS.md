@@ -17,6 +17,63 @@ Format:
 
 ---
 
+## Two code paths for the same job — and the default config ran the worse one
+
+**Symptom:** REX felt unresponsive in a way that didn't match the code.
+The HUD's "didn't catch that" — the thing that's supposed to tell you
+REX heard you but didn't understand — never appeared, no matter how
+much nonsense was spoken into an open wake window. Reading
+`matcher.py` showed the event being emitted correctly, right there at
+line 116.
+
+**Root cause:** It was emitted correctly in the path that wasn't
+running. `low_latency_mode: true` is the default in
+`default_config.yaml`, so `FastVAD` handles dispatch for essentially
+every user. `FastVAD` never called `matcher.dispatch_command` — the
+matching and execution logic was reimplemented as closures inside
+`run_assistant`, with gate checks and metrics spread through
+`fast_vad.py`. Over time the two copies drifted, and every difference
+landed on the default path:
+
+- `ui_callback("no_match", …)` existed *only* in `matcher.py`, so the
+  HUD event was unreachable in the shipped configuration.
+- The match event passed `text=""` — the closure never received the
+  recognized text, so even successful matches showed blank.
+- `fast_vad.py` contained zero `try`/`except`. A throwing handler would
+  escape the task and `asyncio.gather` would tear the assistant down.
+  This never fired only because every handler carries `@safe_call`.
+- The wake gate was checked twice, in two different modules, each
+  recording its own suppression metric.
+
+**Fix:** One seam — `matcher.dispatch_text()` — called by both paths,
+returning a `DispatchResult` rich enough for FastVAD to keep making its
+buffering decisions. See
+[DECISIONS.md](DECISIONS.md) "One dispatch seam" and
+[PHASE0_DISPATCH.md](PHASE0_DISPATCH.md).
+
+**Lesson:** When a feature is provably present in the code but never
+observed at runtime, check *which* branch of a mode switch you're
+reading before you debug the feature. The tell here was a config
+default: `low_latency_mode: true` meant the well-structured code path
+was the fallback, not the norm — so every code review looked at the
+wrong file. Two implementations of the same behaviour will always
+drift; the one guarded by a non-default flag is the one that stays
+correct, because it's the one people read. If you must have two paths,
+give them one shared core and let the paths differ only in how they
+*feed* it.
+
+Corollary: a decorator that's "just" defensive convenience can quietly
+become load-bearing. `@safe_call` was documented as swallowing
+transient network errors, but it was the only thing keeping an
+exception from killing the process on the default path. Nothing said
+so, and nothing tested it.
+
+**See also:** [rex_main/matcher.py](../rex_main/matcher.py)
+`dispatch_text`; [rex_main/fast_vad.py](../rex_main/fast_vad.py);
+`test_dispatch.py`.
+
+---
+
 ## openWakeWord ships without its mel/embedding pre-processors — the load error names *your* model, not the missing bundled file
 
 **Symptom:** Fresh `uv` venv. `uv run rex --gaming` boots cleanly through Whisper warmup, then on wake-word init:
