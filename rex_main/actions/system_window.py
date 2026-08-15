@@ -368,10 +368,13 @@ def show_desktop() -> None:
     backend=_BACKEND,
     transport=_TRANSPORT,
     summary="Switch to the next virtual desktop.",
-    patterns=[rf"^{_W}(?:next\s+desktop|desktop\s+right|switch\s+desktop\s+right){_END}"],
+    # Not "next desktop": bare "next" is a complete phrase on the media
+    # backend, so FastVAD executes a track skip on the partial before
+    # "desktop" arrives. Distinct phrasing is the documented fix — see
+    # DECISIONS.md, "Phrase-based disambiguation, not prefix-based".
+    patterns=[rf"^{_W}(?:switch\s+)?desktop\s+right{_END}"],
     side_effects=("virtual_desktop",),
-    examples=("next desktop", "desktop right", "switch desktop right"),
-    no_early_match=True,
+    examples=("desktop right", "switch desktop right"),
 )
 def next_desktop() -> None:
     _send_chord(_VK_LWIN, _VK_CONTROL, _VK_RIGHT)
@@ -383,12 +386,10 @@ def next_desktop() -> None:
     backend=_BACKEND,
     transport=_TRANSPORT,
     summary="Switch to the previous virtual desktop.",
-    patterns=[
-        rf"^{_W}(?:(?:last|previous)\s+desktop|desktop\s+left|switch\s+desktop\s+left){_END}"
-    ],
+    # Not "last desktop" / "previous desktop", for the same prefix reason.
+    patterns=[rf"^{_W}(?:switch\s+)?desktop\s+left{_END}"],
     side_effects=("virtual_desktop",),
-    examples=("last desktop", "previous desktop", "desktop left", "switch desktop left"),
-    no_early_match=True,
+    examples=("desktop left", "switch desktop left"),
 )
 def last_desktop() -> None:
     _send_chord(_VK_LWIN, _VK_CONTROL, _VK_LEFT)

@@ -250,8 +250,8 @@ and does nothing.
 | `system_window_snap_left` | `snap_window_left` | "snap left", "snap window left", "snap to the left" | — | `window_position` |
 | `system_window_snap_right` | `snap_window_right` | "snap right", "snap window right", "snap to the right" | — | `window_position` |
 | `system_window_show_desktop` | `show_desktop` | "show desktop", "minimize everything", "minimize all" | — | `window_state` |
-| `system_window_next_desktop` | `next_desktop` | "next desktop", "desktop right", "switch desktop right" | — | `virtual_desktop` |
-| `system_window_last_desktop` | `last_desktop` | "last desktop", "previous desktop", "desktop left" | — | `virtual_desktop` |
+| `system_window_next_desktop` | `next_desktop` | "desktop right", "switch desktop right" | — | `virtual_desktop` |
+| `system_window_last_desktop` | `last_desktop` | "desktop left", "switch desktop left" | — | `virtual_desktop` |
 | `system_window_lock_screen` | `lock_screen` | "lock", "lock screen", "lock the screen", "lock the pc" | — | `session_state` |
 
 No preconditions — `user32` is always there. Always-on (`slot=None`);
@@ -278,8 +278,14 @@ Behaviour worth knowing:
   nothing — `WM_CLOSE` to `Progman` takes the desktop down with it.
 - **"snap left" un-snaps a right-snapped window** rather than moving it
   across. That is Windows' own Win+Arrow behaviour, not a REX quirk.
+- **Virtual-desktop switching is "desktop left/right", not "next/last
+  desktop".** Bare "next" and "last" are complete phrases on the media
+  backend, so FastVAD executes a track skip on the partial before
+  "desktop" arrives. Distinct phrasing is the documented answer — see
+  [DECISIONS.md](DECISIONS.md), "Phrase-based disambiguation, not
+  prefix-based", and the FastVAD prefix entry in [LESSONS.md](LESSONS.md).
 - **`no_early_match`** on minimize (prefix of "minimize everything"),
-  close window, lock, and both desktop switches.
+  close window, and lock.
 - **Shutdown, restart, sleep and log off are deliberately absent.** See
   the safety rails in [PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md).
 

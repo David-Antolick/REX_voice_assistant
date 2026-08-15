@@ -17,6 +17,54 @@ Format:
 
 ---
 
+## One phrase, two actions: under FastVAD, a phrase whose prefix is another action's *complete* phrase fires both
+
+**Symptom:** On an integration build carrying `system_audio` and
+`system_window` together, saying "next desktop" skipped the user's music
+*and then* switched virtual desktop. Two actions from one utterance. Every
+individual action was correct and every backend's tests were green.
+
+**Root cause:** FastVAD re-transcribes mid-utterance and dispatches each
+partial with `early=True`. The partial "next" is a complete match for the
+media backend's `next_track`, which is not `no_early_match`, so it
+executes immediately. The full utterance "next desktop" then matches
+`system_window_next_desktop` and executes too. Nothing is racing and
+nothing is misheard — the shorter action simply *is* a valid command, and
+it arrives first.
+
+**Fix:** Dropped the bare "next desktop" / "last desktop" / "previous
+desktop" phrasings. Virtual-desktop switching is "desktop left" /
+"desktop right" / "switch desktop left|right", none of which have a
+shorter prefix that matches anything. The alternative — marking the media
+backend's `next` / `previous` as `no_early_match` — was rejected: those
+are the hottest commands in the product and `no_early_match` costs them
+the full silence timeout, trading everyday latency for a rare command.
+
+**Lesson:** Two rules fall out of this.
+
+1. **When adding a multi-word phrase, check whether any prefix of it is
+   already a complete phrase on a concurrently active backend.** Not
+   whether the full phrases collide — the collision tests already cover
+   that — but whether a *prefix* does. Distinct phrasing is the answer,
+   per [DECISIONS.md](DECISIONS.md) "Phrase-based disambiguation, not
+   prefix-based"; `no_early_match` is the wrong lever when the shorter
+   phrase is the common one.
+2. **This class of bug is invisible to a single backend's tests.** It
+   needs two backends active at once *and* the FastVAD early-dispatch
+   path, so it only shows up on an integration build.
+   `test_no_phrase_collision_between_concurrently_active_backends`
+   compares whole examples against whole patterns and will not catch it.
+
+It also **pre-dates the PC-control wave**: `spotify_queue_track`'s "next
+track \<query\>" has exactly this shape against a bare "next", and has
+had it all along.
+
+**See also:** [rex_main/actions/system_window.py](../rex_main/actions/system_window.py),
+[rex_main/fast_vad.py](../rex_main/fast_vad.py),
+[PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md), [ACTIONS.md](ACTIONS.md).
+
+---
+
 ## "Minimize" then "restore" restores the wrong window — minimizing gives the foreground away
 
 **Symptom:** Saying "minimize" then "restore" left the window minimized.
