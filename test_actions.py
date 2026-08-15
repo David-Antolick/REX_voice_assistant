@@ -106,6 +106,39 @@ def test_no_phrase_collision_within_a_backend():
     assert not failures, "Phrase collisions within a backend:\n" + "\n".join(failures)
 
 
+@pytest.mark.parametrize("music_backend", ["ytmd", "spotify"])
+def test_no_phrase_collision_between_concurrently_active_backends(music_backend):
+    """No two *simultaneously active* actions may claim the same phrase.
+
+    The intra-backend test above is not enough. Slot-exclusive backends
+    (ytmd vs spotify) can safely share phrases because only one is ever
+    active — but a slotless backend is active alongside everything, so a
+    phrase it shares with the live music backend is decided by module
+    import order in rex_main/actions/__init__.py. Silent and arbitrary.
+
+    This is the tripwire for the planned `system` backend, which claims
+    generic phrases like "volume up". See docs/PC_CONTROL_PLAN.md.
+    """
+    actions.set_active_backend("music", music_backend)
+    try:
+        active = actions.active_specs()
+        failures: list[str] = []
+        for spec in active:
+            for ex in spec.examples:
+                hitters = [
+                    other.name for other in active
+                    if any(re.compile(p, re.I).match(ex) for p in other.patterns)
+                ]
+                if len(hitters) != 1:
+                    failures.append(f"  example={ex!r} matches: {hitters}")
+        assert not failures, (
+            f"Phrase collisions with music={music_backend} "
+            f"(first match wins by import order):\n" + "\n".join(failures)
+        )
+    finally:
+        actions.set_active_backend("music", "ytmd")
+
+
 # Slot routing
 
 def test_active_specs_filter_by_slot():
