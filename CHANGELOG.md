@@ -1,5 +1,40 @@
 # REX Voice Assistant - Changelog
 
+## [1.3.1] - 2026-08-15
+
+Patch release. Fixes a bug that broke the wake word on every fresh install.
+
+### Fixed
+
+#### Wake-word gate disabled itself on fresh installs
+- openWakeWord ships without its `melspectrogram.onnx` / `embedding_model.onnx`
+  pre-processors — they're fetched on first use into
+  `<site-packages>/openwakeword/resources/models/`. On a clean install they're
+  absent, so the model load failed with `NO_SUCHFILE` and REX disabled the gate.
+- The error message named *your* wake model, not the missing bundled file, which
+  sent debugging in the wrong direction — a custom `hey_rex.onnx` looked broken
+  when it was fine. See [docs/LESSONS.md](docs/LESSONS.md).
+- [rex_main/wake_word.py](rex_main/wake_word.py) now verifies the pre-processors
+  exist before any load attempt and fetches just those (~10 MB) if missing,
+  using a sentinel model name so `download_models` skips the ~30 MB prebuilt
+  wakeword set REX doesn't use.
+
+#### `--log_file` default wrote into the package directory
+- `python -m rex_main.rex` defaulted to `rex_main/logs/rex_log.log`, a path
+  relative to the working directory — it only worked when run from a source
+  checkout, and pointed inside `site-packages` for installed users. Now defaults
+  to `~/.rex/logs/rex.log`, matching `config.py`, the tray, and the settings
+  dialog. The path is expanded and its directory created, which
+  `RotatingFileHandler` does not do on its own.
+- The `rex` CLI was never affected; it resolves the path via `get_log_file_path()`.
+
+### Repo hygiene
+- Added [.gitattributes](.gitattributes) (`* text=auto`). Without it, opening the
+  repo from WSL rewrote every line ending and made all 61 tracked text files show
+  as fully modified.
+- Untracked `rex_main/logs/rex_log.log`, a stale runtime log from 2025-12 that
+  had been committed; added `*.log` to [.gitignore](.gitignore).
+
 ## [1.3.0] - 2026-05-16
 
 Voice control for the **YTVD** fork (YouTube Video + Music Desktop). Music-side commands are unchanged — YTVD preserves YTMD's `/api/v1/command` namespace and reuses the same auth token / env vars — so existing `ytmd_*` actions keep working on YTVD installs without re-auth or config changes. What's new is the video side: REX now drives YTVD's `/api/v1/playback/*` and `/api/v1/video/*` namespaces directly.
