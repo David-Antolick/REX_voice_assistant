@@ -40,3 +40,7 @@ docs/ASSISTANT_ROADMAP.md
 docs/DEVELOPMENT.md
 docs/REX_RESUME_CONTEXT.md
 docs/archive/
+
+# Runtime logs (real ones live in ~/.rex/logs/)
+*.log
+rex_main/logs/

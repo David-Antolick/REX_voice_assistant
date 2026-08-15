@@ -18,16 +18,16 @@ import argparse
 import asyncio
 import signal
 import sys
+from pathlib import Path
 from typing import Optional, Any, Callable
 import numpy as np
 
 from rex_main.audio_stream import AudioStream
 from rex_main.vad_stream import SileroVAD
 from rex_main.whisper_worker import WhisperWorker
-from rex_main.matcher import dispatch_command, COMMAND_PATTERNS, NO_EARLY_MATCH_COMMANDS
+from rex_main.matcher import dispatch_command, dispatch_text
 from rex_main.metrics_printer import print_metrics_loop
 from rex_main.benchmark import benchmark
-from rex_main import actions
 
 import logging
 logger = logging.getLogger("rex")
@@ -57,7 +57,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--log_file",
         type=str,
-        default="rex_main/logs/rex_log.log",
+        default="~/.rex/logs/rex.log",
         help="Path to write rotating logs",
     )
     p.add_argument(
@@ -119,8 +119,12 @@ async def run_assistant(
     # Rotating file handler
     if opts.log_file:
         from logging.handlers import RotatingFileHandler
+        # Direct `python -m rex_main.rex` skips cli.py's get_log_file_path(),
+        # so expand and mkdir here too — RotatingFileHandler does neither.
+        log_path = Path(opts.log_file).expanduser()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         fileh = RotatingFileHandler(
-            opts.log_file,
+            log_path,
             maxBytes=2_000_000,
             backupCount=2,
         )
@@ -237,51 +241,28 @@ async def run_assistant(
             from rex_main.fast_vad import FastVAD
             logger.info("Low-latency mode: Using FastVAD with early command detection")
 
-            # Create helper functions for FastVAD
+            # Transcription stays here (it's a VAD concern); matching, the
+            # wake gate, UI events and the error boundary all live behind
+            # dispatch_text — the same seam standard mode uses.
             def transcribe_sync(audio: np.ndarray) -> str:
                 return whisper._transcribe(audio)
 
-            def match_command(text: str) -> tuple[bool, Optional[str], tuple, bool]:
-                """Check if text matches any command pattern.
-
-                Returns: (matched, func_name, args, allow_early_match)
-                """
-                text = text.strip()
-                for pattern, func_name in COMMAND_PATTERNS:
-                    m = pattern.match(text)
-                    if m:
-                        allow_early = func_name not in NO_EARLY_MATCH_COMMANDS
-                        return (True, func_name, m.groups(), allow_early)
-                return (False, None, (), True)
-
-            def execute_command(func_name: str, args: tuple) -> None:
-                """Execute a matched command, respecting the wake-word gate."""
-                if paused is not None and paused.is_set():
-                    return
-                if not listening_state.is_active():
-                    logger.debug("Command '%s' suppressed - wake word not active", func_name)
-                    try:
-                        from rex_main.metrics import metrics as _metrics
-                        _metrics.record_command_suppressed(func_name)
-                    except Exception:
-                        pass
-                    return
-                # Refresh window so multi-step interactions work without re-waking.
-                listening_state.activate()
-                func = actions.resolve_handler(func_name)
-                _emit("match", action=func_name, text="", args=args)
-                if callable(func):
-                    func(*args)
+            def dispatch_func(text: str, early: bool):
+                return dispatch_text(
+                    text,
+                    listening_state=listening_state,
+                    ui_callback=ui_callback,
+                    paused=paused,
+                    early=early,
+                )
 
             fast_vad = FastVAD(
                 audio_q,
                 transcribe_func=transcribe_sync,
-                match_func=match_command,
-                execute_func=execute_command,
+                dispatch_func=dispatch_func,
                 silence_ms=250,
                 min_speech_ms=300,
                 early_check_interval_ms=200,
-                gate_func=listening_state.is_active,
             )
 
             tasks = [

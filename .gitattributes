@@ -1,0 +1,8 @@
+# Repo stores LF; working trees on Windows keep whatever the editor wrote.
+# Without this, editing from WSL made every file look fully rewritten.
+* text=auto
+
+*.png binary
+*.onnx binary
+*.tflite binary
+*.wav binary

@@ -11,7 +11,7 @@ This can reduce latency from ~2-3s to ~500-800ms for short commands.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional, Callable
+from typing import Callable, Optional, TYPE_CHECKING
 from collections import deque
 import numpy as np
 import torch
@@ -20,6 +20,9 @@ import time
 
 from rex_main.metrics import metrics
 from rex_main.benchmark import benchmark
+
+if TYPE_CHECKING:
+    from rex_main.matcher import DispatchResult
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +47,9 @@ class FastVAD:
         Queue delivering fixed-length float32 PCM frames.
     transcribe_func : Callable
         Function that takes audio (np.ndarray) and returns transcribed text.
-    match_func : Callable
-        Function that takes text and returns (matched: bool, command_name: str | None, args: tuple, allow_early: bool).
-    execute_func : Callable
-        Function that executes a matched command.
+    dispatch_func : Callable
+        ``(text, early) -> DispatchResult``. Owns matching, the wake gate,
+        UI events, and the error boundary — see rex_main.matcher.dispatch_text.
     sample_rate : int
         Audio sample rate (default: 16000).
     frame_ms : int
@@ -66,8 +68,7 @@ class FastVAD:
         self,
         in_queue: asyncio.Queue,
         transcribe_func: Callable[[np.ndarray], str],
-        match_func: Callable[[str], tuple[bool, Optional[str], tuple, bool]],
-        execute_func: Callable[[str, tuple], None],
+        dispatch_func: Callable[..., "DispatchResult"],
         *,
         sample_rate: int = 16_000,
         frame_ms: int = 32,
@@ -76,13 +77,10 @@ class FastVAD:
         min_speech_ms: int = 300,
         early_check_interval_ms: int = 200,
         max_utterance_ms: int = 10_000,
-        gate_func: Optional[Callable[[], bool]] = None,
     ):
         self.in_q = in_queue
         self.transcribe = transcribe_func
-        self.match = match_func
-        self.execute = execute_func
-        self.gate_func = gate_func or (lambda: True)
+        self.dispatch = dispatch_func
 
         self.sr = sample_rate
         self.frame_ms = frame_ms
@@ -107,9 +105,27 @@ class FastVAD:
         )
 
     async def run(self):
-        """Main VAD loop with early command detection."""
+        """Supervise the VAD loop.
+
+        Action handlers are already guarded inside dispatch_text, but VAD
+        inference and transcription are not. Without this, one bad frame
+        kills the task and asyncio.gather in run_assistant tears the whole
+        assistant down. Restarting _loop() re-initialises the utterance
+        state, which is the right recovery: drop the partial utterance and
+        listen again.
+        """
         self._lazy_init()
 
+        while True:
+            try:
+                await self._loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("FastVAD loop error - dropping utterance and continuing")
+
+    async def _loop(self):
+        """Main VAD loop with early command detection."""
         speech_buf: list[np.ndarray] = []
         silence_ctr = 0
         frames_since_check = 0
@@ -160,45 +176,34 @@ class FastVAD:
                         last_early_text = text
                         logger.debug("Early transcription (%.0fms): %r", dt, text)
 
-                        # Check for command match
-                        matched, cmd_name, args, allow_early = self.match(text)
-                        if matched and cmd_name and not allow_early:
-                            # Skip early match for commands that need full utterance (e.g., search)
-                            logger.debug("Skipping early match for '%s' (requires full utterance)", cmd_name)
+                        # Dispatch owns matching, the gate, UI events and the
+                        # error boundary; we only decide what to do with the
+                        # audio buffer afterwards. Command/exec metrics are
+                        # recorded in there — don't record them again here.
+                        result = self.dispatch(text, early=True)
+
+                        if result.deferred:
+                            # Needs the full utterance (e.g. search) — keep collecting.
                             continue
-                        if matched and cmd_name:
-                            if not self.gate_func():
-                                logger.info("Suppressed early match '%s' from %r (wake word not active)", cmd_name, text)
-                                metrics.record_command_suppressed(cmd_name)
-                                # Drop the buffer so we don't keep retranscribing the same audio.
-                                speech_buf.clear()
-                                self._pre_buf.clear()
-                                silence_ctr = 0
-                                command_executed = True  # treat as handled to skip flush
-                                continue
-                            logger.info("Early match! Command '%s' from: %r", cmd_name, text)
+
+                        if result.executed:
+                            logger.info("Early match! Command '%s' from: %r", result.action, text)
                             metrics.record_transcription(text, dt)
-                            metrics.record_command_match(cmd_name, matched=True)
 
-                            # Execute immediately
-                            t1 = time.perf_counter()
-                            self.execute(cmd_name, args)
-                            exec_dt = (time.perf_counter() - t1) * 1000
-                            metrics.record_command_execute(cmd_name, exec_dt)
-
-                            # Record for benchmark
                             duration_ms = len(speech_buf) * self.frame_ms
-                            audio_duration_ms = len(speech_buf) * self.frame_ms
-                            benchmark.record_vad_complete(duration_ms, audio_duration_ms)
+                            benchmark.record_vad_complete(duration_ms, duration_ms)
                             benchmark.record_transcription(dt)
-                            benchmark.record_command(cmd_name, text, True, exec_dt, early_match=True)
-
-                            # Mark as executed, but keep collecting
-                            # (in case user continues speaking)
-                            command_executed = True
-
-                            # Clear buffer and reset
+                            benchmark.record_command(
+                                result.action, text, True,
+                                result.exec_ms or 0.0, early_match=True,
+                            )
                             metrics.record_vad_emit(duration_ms)
+
+                        if result.executed or result.suppressed:
+                            # Handled either way. Drop the buffer so we don't
+                            # keep retranscribing the same audio, but keep
+                            # collecting in case the user continues speaking.
+                            command_executed = True
                             speech_buf.clear()
                             self._pre_buf.clear()
                             silence_ctr = 0
@@ -233,23 +238,17 @@ class FastVAD:
                                 benchmark.record_vad_complete(duration_ms, duration_ms)
                                 benchmark.record_transcription(dt)
 
-                                matched, cmd_name, args, _ = self.match(text)
+                                # Final pass: a miss here is a real miss, so
+                                # dispatch emits the no_match UI event.
+                                result = self.dispatch(text, early=False)
 
-                                if matched and cmd_name:
-                                    if not self.gate_func():
-                                        logger.info("Suppressed final match '%s' from %r (wake word not active)", cmd_name, text)
-                                        metrics.record_command_suppressed(cmd_name)
-                                    else:
-                                        metrics.record_command_match(cmd_name, matched=True)
-                                        t1 = time.perf_counter()
-                                        self.execute(cmd_name, args)
-                                        exec_dt = (time.perf_counter() - t1) * 1000
-                                        metrics.record_command_execute(cmd_name, exec_dt)
-                                        benchmark.record_command(cmd_name, text, True, exec_dt, early_match=False)
-                                else:
-                                    metrics.record_command_match(None, matched=False)
+                                if result.executed:
+                                    benchmark.record_command(
+                                        result.action, text, True,
+                                        result.exec_ms or 0.0, early_match=False,
+                                    )
+                                elif not result.matched:
                                     benchmark.record_command("none", text, False, 0.0, early_match=False)
-                                    logger.debug("No command matched: %r", text)
 
                         # Reset state
                         speech_buf.clear()

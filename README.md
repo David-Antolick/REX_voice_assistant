@@ -332,11 +332,20 @@ pytest
 
 ### Roadmap
 
+The near-term focus is widening REX beyond music — system volume, global
+media keys, window management, and launching or focusing any installed app,
+so it's useful when no music is playing at all.
+
+- System control backend: volume, media keys, window management, lock
+- Launch or focus **any** installed app by name, not just the music apps
+- Dictation mode — speak into the focused text field
+- Action discovery panel ("what can I say?"), generated from the registry
 - Command history / log viewer in the desktop UI
 - Microphone test panel + push-to-talk binding capture in Settings
 - Per-app voice profiles (different command sets when a given window is focused)
-- Spacebar/Fermi voice-chat backend (replacement for the removed Discord integration)
-- See [docs/UI_PLAN.md](docs/UI_PLAN.md) for the full UI vision (v1 / v1.x / v2)
+
+See [docs/PC_CONTROL_PLAN.md](docs/PC_CONTROL_PLAN.md) for the full plan and
+[docs/UI_PLAN.md](docs/UI_PLAN.md) for the UI vision (v1 / v1.x / v2).
 
 ---
 

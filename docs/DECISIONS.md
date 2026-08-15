@@ -18,6 +18,76 @@ Format:
 
 ---
 
+## 2026-08-15 — One dispatch seam: `matcher.dispatch_text()` owns matching, gating, and the error boundary
+
+**Context:** REX had two dispatch paths. `matcher.dispatch_command`
+served the standard VAD → Whisper → matcher pipeline, while the
+low-latency `FastVAD` path reimplemented matching and execution inline
+in `run_assistant` (`match_command` / `execute_command` closures) plus
+its own gate checks and metrics in `fast_vad.py`. Because
+`low_latency_mode: true` is the default in `default_config.yaml`, the
+reimplementation was what nearly every user actually ran, and the two
+had drifted: no `no_match` UI event, `text=""` on match events, no
+try/except around handler invocation, and the wake gate checked twice
+in two places.
+
+This blocked [PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md) Phase 1. System
+actions fail with COM errors and missing window handles rather than
+`RequestException`, and the default path had no error boundary — only
+`@safe_call` on every existing handler kept a throwing action from
+killing the assistant.
+
+**Decision:** Extract one function, `matcher.dispatch_text(text, *,
+listening_state, ui_callback, paused, early)`, returning a
+`DispatchResult` dataclass (`matched` / `action` / `executed` /
+`deferred` / `suppressed` / `exec_ms`). It owns the paused check,
+pattern match, `no_early_match` deferral, wake gate + suppression,
+match metric, UI events, guarded invocation, and execute metric. Both
+paths call it. `FastVAD` takes a single `dispatch_func` in place of
+`match_func` + `execute_func` and no longer takes `gate_func` at all —
+it only decides what to do with the audio buffer based on the result.
+
+The `early` flag exists for one reason: FastVAD re-transcribes every
+~200 ms mid-utterance, so a no-match event per partial would strobe the
+HUD's "didn't catch that" through every sentence. Early passes stay
+silent on a miss; only the final flush reports one.
+
+**Alternatives considered:**
+
+- **Make FastVAD push text into the standard `text_q`.** Would have
+  unified the paths for free, but destroys the point of FastVAD — early
+  dispatch has to happen *during* the utterance, not after it, and the
+  queue hop adds exactly the latency the mode exists to avoid.
+- **Delete low-latency mode and keep one path.** Simplest possible
+  answer, but it's the default and the faster one; standard mode is the
+  fallback, not the other way round.
+- **Leave the duplication and just patch the four symptoms.** Rejected:
+  the two copies would drift again on the next change, and Phase 1 adds
+  ~15 actions to the surface.
+
+**Consequences:**
+
+- Adding an action now has exactly one dispatch behaviour to reason
+  about, regardless of VAD mode.
+- Handler exceptions are contained in one place, so `@safe_call` is a
+  per-backend convenience rather than load-bearing for process
+  stability. New backends can't take REX down by forgetting it.
+- `fast_vad.py` keeps only audio-shaped telemetry
+  (`record_speech_start` / `record_vad_emit` / `record_transcription`,
+  and all `benchmark.*` calls, which need audio durations and the
+  `early_match=` distinction). Command/exec/suppression metrics moved
+  into the seam — recording them in both places would double-count.
+- `dispatch_text` is on the hot path and is covered by the existing
+  `test_perf_dispatch_per_match` ceiling (measured 2.43 µs / 50 µs).
+- The dispatch chain is now unit-testable without audio hardware or a
+  loaded model — `test_dispatch.py`, the first tests to cover it.
+
+**See also:** [PHASE0_DISPATCH.md](PHASE0_DISPATCH.md) for the full
+implementation plan; [rex_main/matcher.py](../rex_main/matcher.py);
+[LESSONS.md](LESSONS.md) "Two code paths for the same job".
+
+---
+
 ## 2026-05-16 — New `ytvd` backend (separate file) for YouTube Video + Music desktop fork
 
 **Context:** The user moved from YTMD to **YTVD** — a fork that adds a
