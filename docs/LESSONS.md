@@ -17,6 +17,35 @@ Format:
 
 ---
 
+## "Minimize" then "restore" restores the wrong window — minimizing gives the foreground away
+
+**Symptom:** Saying "minimize" then "restore" left the window minimized.
+Worse, `restore` wasn't a no-op — it ran `ShowWindow(SW_RESTORE)` against
+whatever app surfaced behind the minimized one.
+
+**Root cause:** Every window command resolved its target with
+`GetForegroundWindow()`. That is correct for minimize / maximize / close,
+but a minimized window is by definition no longer the foreground window,
+so the *next* command resolves to an unrelated app. Windows has no
+"restore the last minimized window" primitive to fall back on.
+
+**Fix:** `system_window` remembers the HWND it last minimized and prefers
+it for `restore`, guarded by `IsWindow` + `IsIconic` so a stale handle
+falls through. With nothing outstanding, `restore` keeps its other
+meaning: un-maximize the foreground window.
+
+**Lesson:** Voice commands arrive as a *sequence*, and each one changes
+the state the next one reads. Any command that acts on "the current X"
+needs checking against the command that plausibly precedes it — the
+failure is silent and lands on the wrong target, which is worse than an
+error. The same trap is waiting for anything that resolves a window by
+foreground (see the `switch to <app>` work in `apps.py`).
+
+**See also:** [rex_main/actions/system_window.py](../rex_main/actions/system_window.py),
+[PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md) safety rails.
+
+---
+
 ## Two code paths for the same job — and the default config ran the worse one
 
 **Symptom:** REX felt unresponsive in a way that didn't match the code.

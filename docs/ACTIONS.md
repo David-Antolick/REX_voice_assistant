@@ -239,6 +239,50 @@ shells out to `taskkill /F` against the app's image name. If the app
 isn't installed in any known location, the open command logs a warning
 and does nothing.
 
+### `system_window` — Window / desktop / session control (slot: `None`, transport: `os_native`)
+
+| Action | Capability | Phrases | Args | Side effects |
+|---|---|---|---|---|
+| `system_window_minimize` | `minimize_window` | "minimize", "minimise", "minimize the window" | — | `window_state` |
+| `system_window_maximize` | `maximize_window` | "maximize", "maximise", "maximize the window" | — | `window_state` |
+| `system_window_restore` | `restore_window` | "restore", "restore window", "unmaximize" | — | `window_state` |
+| `system_window_close` | `close_window` | "close window", "close this window", "close the window" | — | `window_state` |
+| `system_window_snap_left` | `snap_window_left` | "snap left", "snap window left", "snap to the left" | — | `window_position` |
+| `system_window_snap_right` | `snap_window_right` | "snap right", "snap window right", "snap to the right" | — | `window_position` |
+| `system_window_show_desktop` | `show_desktop` | "show desktop", "minimize everything", "minimize all" | — | `window_state` |
+| `system_window_next_desktop` | `next_desktop` | "next desktop", "desktop right", "switch desktop right" | — | `virtual_desktop` |
+| `system_window_last_desktop` | `last_desktop` | "last desktop", "previous desktop", "desktop left" | — | `virtual_desktop` |
+| `system_window_lock_screen` | `lock_screen` | "lock", "lock screen", "lock the screen", "lock the pc" | — | `session_state` |
+
+No preconditions — `user32` is always there. Always-on (`slot=None`);
+there is one desktop, so nothing competes for this surface.
+
+Minimize / maximize / restore / close target the foreground window
+directly (`ShowWindow`, `PostMessageW`). Snap, show-desktop and
+virtual-desktop switching have no public API, so they go out as synthetic
+Win-key hotkeys via `SendInput` — Win+Left/Right, Win+D,
+Win+Ctrl+Left/Right.
+
+Behaviour worth knowing:
+
+- **"close window" posts `WM_CLOSE`**, a request the app may decline or
+  answer with a save prompt. This is deliberately *not* how
+  `apps_close_*` behaves — `taskkill /F` is safe only because it is
+  scoped to a named app.
+- **"restore" prefers the window REX last minimized**, falling back to
+  un-maximizing the foreground window. Minimizing hands the foreground to
+  an unrelated app, so a plain foreground restore acts on the wrong
+  window. See [LESSONS.md](LESSONS.md).
+- **Shell windows are ignored.** If the desktop or taskbar has focus
+  (`Progman` / `WorkerW` / `Shell_TrayWnd`) the command logs and does
+  nothing — `WM_CLOSE` to `Progman` takes the desktop down with it.
+- **"snap left" un-snaps a right-snapped window** rather than moving it
+  across. That is Windows' own Win+Arrow behaviour, not a REX quirk.
+- **`no_early_match`** on minimize (prefix of "minimize everything"),
+  close window, lock, and both desktop switches.
+- **Shutdown, restart, sleep and log off are deliberately absent.** See
+  the safety rails in [PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md).
+
 ---
 
 ## Adding a new backend (the `discord` / `steam` / `windows_audio` recipe)
