@@ -246,8 +246,10 @@ Recognition will misfire. Design for when it does.
 - **A scripting or macro language.** "Custom command editor" is in
   UI_PLAN v2; keep it there.
 - **Remote or network control.** REX is local-first and offline. No
-  phone app, no web endpoint. This is also why the dead
-  `rex_main/dashboard/` HTTP server should go.
+  phone app, no LAN binding. The `rex_main/dashboard/` server stays
+  loopback-only and read-only — see [DASHBOARD_PLAN.md](DASHBOARD_PLAN.md),
+  which revives it as an ambient second-monitor readout rather than
+  deleting it.
 - **Cross-platform support.** Windows-only, as the project already is.
 - **An LLM in the dispatch loop.** The registry carries planner-ready
   metadata for a reason, but regex dispatch is fast, offline, and

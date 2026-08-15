@@ -18,6 +18,65 @@ Format:
 
 ---
 
+## 2026-08-15 — Keep the web dashboard, as an ambient readout (supersedes "the web dashboard idea is dead")
+
+**Context:** [UI_PLAN.md](UI_PLAN.md) states "The web dashboard idea is
+dead. REX is local-first and offline; opening a browser tab to localhost
+feels wrong for an always-on background app." Phase 1 planning initially
+took that at face value and scheduled `rex_main/dashboard/` for deletion.
+
+Two things changed that. First, the code is substantially more built out
+than the "dead code" label implied — ~1,200 lines including six REST
+endpoints and a WebSocket already pushing stats, recent transcriptions,
+command frequency, CPU per-core, memory, GPU utilisation, VRAM and GPU
+temperature every second. `fastapi`, `uvicorn` and `websockets` are
+already base dependencies. Second, the intended use is not the one
+UI_PLAN rejected: a panel left open on a second monitor while working,
+never clicked.
+
+**Decision:** Keep it and rewrite the presentation layer. The dashboard
+becomes a read-only ambient readout — live state, last recognized
+command, an utterance feed, and health/cost meters. Server endpoints stay;
+`dashboard/static/` is replaced. Full design in
+[DASHBOARD_PLAN.md](DASHBOARD_PLAN.md).
+
+UI_PLAN's judgment stands for what it actually addressed: the browser tab
+is not the **control surface**. Settings stay in the tray dialog. The
+dashboard takes no input — the moment it grows a button it becomes the
+thing UI_PLAN rejected.
+
+**Alternatives considered:**
+
+- **Delete it, as originally planned.** Would have discarded working
+  telemetry plumbing and three already-paid-for dependencies, to solve a
+  problem (browser-tab-as-settings) the panel doesn't have.
+- **Rebuild the ambient view as a second Qt window.** Keeps everything in
+  one process and drops the HTTP surface, but a browser window is easier
+  to park, size and leave on another monitor across reboots, and the
+  server already exists.
+- **Keep it exactly as-is.** The plumbing is good; the presentation isn't
+  built for glanceability at 1.5-2 m.
+
+**Consequences:**
+
+- One backend change needed: `run_assistant`'s `ui_callback` must fan out
+  to the dashboard as a second sink alongside the Qt bridge, so state and
+  match/no-match events push immediately rather than arriving on the 1 s
+  poll. Split as stream E1 in [PHASE1_STREAMS.md](PHASE1_STREAMS.md).
+- The feed is only trustworthy because of the dispatch seam — before it,
+  `no_match` was never emitted on the default path, so an ambient "didn't
+  catch that" feed would have been permanently empty.
+- `fastapi` / `uvicorn` / `websockets` move from unused base dependencies
+  to justified ones.
+- Binding stays `127.0.0.1`. No auth is needed while it is loopback-only
+  and read-only; if either changes, that assumption must be revisited.
+
+**See also:** [DASHBOARD_PLAN.md](DASHBOARD_PLAN.md);
+[UI_PLAN.md](UI_PLAN.md) (superseded on this point only);
+[PHASE0_DISPATCH.md](PHASE0_DISPATCH.md).
+
+---
+
 ## 2026-08-15 — One dispatch seam: `matcher.dispatch_text()` owns matching, gating, and the error boundary
 
 **Context:** REX had two dispatch paths. `matcher.dispatch_command`
