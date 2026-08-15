@@ -23,17 +23,46 @@ agents work at once. Both are `slot=None`, transport `os_native`.
 | # | Task | Blocks |
 |---|---|---|
 | **0a** | `uv tool install --force .` so the global `rex` runs current code | nothing, but do it first |
-| **0b** | **Volume API spike** — prove absolute "set volume to 40" via `ctypes` + Core Audio | Stream A only |
+| **0b** | ~~Volume API spike~~ — **DONE**, see below | ~~Stream A~~ unblocked |
 
 **0a matters more than it looks.** Bare `rex` resolves to the uv tool
 install, which was three months stale and had a dead wake gate. A full
 debugging session was lost to testing the wrong build.
 
-**On 0b:** use `ctypes`, not `pycaw`. The supply-chain rule wants a
-justification and prefers multi-maintainer packages; pycaw is a small
-single-maintainer wrapper. There is already an in-repo precedent for raw
-COM/`user32` binding — `rex_main/ui/hud.py:105-121` does exactly this for
-the click-through hack, with proper `argtypes` / `restype`. Follow it.
+### 0b result — `ctypes` works, no dependency needed
+
+Spiked and verified on 2026-08-15. Working reference implementation:
+**[specifics/spike_system_volume.py](specifics/spike_system_volume.py)** —
+run it directly to see it work. Stream A should lift the binding from it.
+
+The chain is `CoCreateInstance(MMDeviceEnumerator)` →
+`GetDefaultAudioEndpoint(eRender, eConsole)` →
+`Activate(IID_IAudioEndpointVolume)`, then the vtable slots. Measured on
+the dev machine (8-channel SteelSeries Sonar endpoint):
+
+| Capability | Result |
+|---|---|
+| Absolute set (`SetMasterVolumeLevelScalar`) | 40 / 75 / 10 % all read back exact |
+| Relative step (`VolumeStepUp` / `Down`) | uses Windows' own 2 % increment |
+| Mute / unmute (`SetMute` / `GetMute`) | works |
+
+So `pycaw` is not needed. That matters under the supply-chain rule —
+pycaw is a small single-maintainer wrapper, and there was already an
+in-repo precedent for raw COM/`user32` binding in
+`rex_main/ui/hud.py:105-121`.
+
+**Use `VolumeStepUp`/`VolumeStepDown` for "volume up/down"** rather than
+a hand-picked delta, so REX's steps match what the volume keys do.
+
+**Two gotchas that cost time in the spike — don't rediscover them:**
+
+1. **`SUCCEEDED(hr)` is `hr >= 0`, not `hr == 0`.** `SetMute` returns
+   `S_FALSE` (1) when the endpoint is *already* in the requested state.
+   A `hr != S_OK` check raises on a perfectly successful call — so
+   "unmute when not muted" would look like a hard failure.
+2. **`IUnknown::Release` returns a refcount (ULONG), not an HRESULT.**
+   Routing it through an HRESULT-checking helper fails on the normal
+   return of 1.
 
 ## Wave 1 — parallel streams
 
