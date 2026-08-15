@@ -62,6 +62,46 @@ Fix: fan `ui_callback` out to the dashboard as a second sink alongside
 the Qt bridge, and push those events immediately. Keep the 1 s tick for
 resources.
 
+Landed. `run_assistant` now builds its emitter with `_make_emitter`,
+which fans every lifecycle event to the Qt bridge *and* to
+`dashboard/events.py`'s `event_hub` — the dashboard is a sink even in
+console mode, where there is no tray. The hub hands each event to the
+server's loop with `call_soon_threadsafe` (the cross-thread move
+`UiBridge` makes with queued connections), onto a bounded per-client
+queue that drops oldest when a browser tab stops reading. A stalled or
+dead client cannot block the audio loop.
+
+### Wire contract
+
+Three frame types on `/ws`, discriminated by `type`:
+
+```jsonc
+// once, on connect — so the panel isn't blank until the next utterance
+{"type": "snapshot",
+ "state": {…event record…} | null,      // last state.* seen
+ "events": [{…event record…}, …]}       // last ≤16 non-state events, oldest first
+
+// immediately, when it happens
+{"type": "event", "event": "state.listening", "ts": 1755300000.12,
+ "payload": {"window_s": 6.0}}
+
+// every 1 s — unchanged apart from the added "type"
+{"type": "metrics", "stats": {…}, "recent": […], "commands": […],
+ "resources": {…}}                      // "resources" absent if benchmark deps are missing
+```
+
+Event names and payloads:
+
+| `event` | `payload` |
+|---|---|
+| `state.idle` | `{}` |
+| `state.listening` | `{"window_s": float}` |
+| `match` | `{"action": str, "text": str, "args": [str, …]}` |
+| `no_match` | `{"text": str}` |
+
+`state.paused` / `state.error` are in the callback vocabulary but nothing
+emits them today. Treat unknown event names as ignorable.
+
 **Phase 0 is what makes this feed trustworthy.** Before the dispatch
 seam landed, `no_match` was never emitted on the default (low-latency)
 path — an ambient "didn't catch that" feed would have been silently,

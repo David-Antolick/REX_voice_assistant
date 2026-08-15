@@ -28,9 +28,33 @@ from rex_main.whisper_worker import WhisperWorker
 from rex_main.matcher import dispatch_command, dispatch_text
 from rex_main.metrics_printer import print_metrics_loop
 from rex_main.benchmark import benchmark
+from rex_main.dashboard.events import event_hub
 
 import logging
 logger = logging.getLogger("rex")
+
+
+def _make_emitter(ui_callback: Optional[Callable[..., None]]) -> Callable[..., None]:
+    """Build the fan-out that carries one lifecycle event to every observer.
+
+    The Qt tray bridge and the dashboard watch the same stream, and the
+    dashboard exists with no tray at all (``rex --console --dashboard``).
+    Each sink runs behind its own guard so a broken observer can't take
+    down the other one — or the audio loop that called us.
+    """
+    sinks: list[Callable[..., None]] = []
+    if ui_callback is not None:
+        sinks.append(ui_callback)
+    sinks.append(event_hub.publish)
+
+    def emit(event: str, **payload: Any) -> None:
+        for sink in sinks:
+            try:
+                sink(event, **payload)
+            except Exception:
+                logger.exception("ui sink raised on %s event", event)
+
+    return emit
 
 
 # CLI
@@ -85,18 +109,14 @@ async def run_assistant(
             ``ui_callback(event: str, **payload)``. Events:
             ``"state.idle"``, ``"state.listening"``, ``"state.paused"``,
             ``"state.error"``, ``"match"`` (action, text, args),
-            ``"no_match"`` (text). Exceptions are caught and logged.
+            ``"no_match"`` (text). Exceptions are caught and logged. The
+            same events also reach the dashboard's event hub, whether or
+            not a ui_callback is supplied.
         paused: Optional ``threading.Event``-like object. When set,
             ``dispatch_command`` drops incoming utterances silently.
     """
 
-    def _emit(event: str, **payload):
-        if ui_callback is None:
-            return
-        try:
-            ui_callback(event, **payload)
-        except Exception:
-            logger.exception("ui_callback raised on %s event", event)
+    _emit = _make_emitter(ui_callback)
 
    # ___ Logging setup ___
     root = logging.getLogger()
@@ -179,23 +199,23 @@ async def run_assistant(
         default_window_s=float(wake_cfg.get("listening_window_seconds", 6)),
     )
 
-    # Wrap activate/deactivate so the UI hears about wake-word fires and
-    # listening-window expirations. No-op when ui_callback is None.
-    if ui_callback is not None:
-        _orig_activate = listening_state.activate
-        _orig_deactivate = listening_state.deactivate
-        _listening_window = float(wake_cfg.get("listening_window_seconds", 6))
+    # Wrap activate/deactivate so observers hear about wake-word fires and
+    # listening-window expirations. Unconditional: the dashboard is a sink
+    # even when there's no tray.
+    _orig_activate = listening_state.activate
+    _orig_deactivate = listening_state.deactivate
+    _listening_window = float(wake_cfg.get("listening_window_seconds", 6))
 
-        def _activate(window_s: Optional[float] = None) -> None:
-            _orig_activate(window_s)
-            _emit("state.listening", window_s=window_s or _listening_window)
+    def _activate(window_s: Optional[float] = None) -> None:
+        _orig_activate(window_s)
+        _emit("state.listening", window_s=window_s or _listening_window)
 
-        def _deactivate() -> None:
-            _orig_deactivate()
-            _emit("state.idle")
+    def _deactivate() -> None:
+        _orig_deactivate()
+        _emit("state.idle")
 
-        listening_state.activate = _activate  # type: ignore[method-assign]
-        listening_state.deactivate = _deactivate  # type: ignore[method-assign]
+    listening_state.activate = _activate  # type: ignore[method-assign]
+    listening_state.deactivate = _deactivate  # type: ignore[method-assign]
 
     _emit("state.idle")
 
@@ -251,7 +271,7 @@ async def run_assistant(
                 return dispatch_text(
                     text,
                     listening_state=listening_state,
-                    ui_callback=ui_callback,
+                    ui_callback=_emit,
                     paused=paused,
                     early=early,
                 )
@@ -280,7 +300,7 @@ async def run_assistant(
                     dispatch_command(
                         text_q,
                         listening_state=listening_state,
-                        ui_callback=ui_callback,
+                        ui_callback=_emit,
                         paused=paused,
                     ),
                     name="matcher",

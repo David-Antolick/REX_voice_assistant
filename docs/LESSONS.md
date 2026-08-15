@@ -17,6 +17,38 @@ Format:
 
 ---
 
+## `from __future__ import annotations` silently broke the dashboard WebSocket
+
+**Symptom:** `/ws` refused every connection with close code 1008. The
+dashboard fell back to nothing, and the only trace was a `logger.debug`
+whose comment blamed browsers: "expected in some browsers (403)".
+
+**Root cause:** `dashboard/server.py` deferred its fastapi imports into
+`_get_app()` so `rex` without `--dashboard` wouldn't pay for them — but
+the module also had `from __future__ import annotations`. That makes
+every annotation a string, and FastAPI resolves endpoint annotations
+against the function's **module** globals, where `WebSocket` doesn't
+exist. The unresolvable annotation didn't raise; it degraded into a
+required query parameter named `websocket`, so every handshake failed
+validation.
+
+**Fix:** Drop the future import from that module, so `websocket:
+WebSocket` is evaluated at `def` time against `_get_app`'s locals. The
+lazy fastapi import is preserved, with a comment saying why the future
+import must not come back.
+
+**Lesson:** Deferred imports and postponed annotations don't mix in any
+framework that introspects signatures — FastAPI, pydantic, typer,
+dataclasses. If a decorator reads your annotations, they must resolve
+from module scope. And a broad `except Exception: logger.debug(...)`
+around connection setup will hide this class of bug for months; the
+misleading comment was written by someone looking straight at it.
+
+**See also:** [DASHBOARD_PLAN.md](DASHBOARD_PLAN.md),
+[rex_main/dashboard/server.py](../rex_main/dashboard/server.py).
+
+---
+
 ## Two code paths for the same job — and the default config ran the worse one
 
 **Symptom:** REX felt unresponsive in a way that didn't match the code.
