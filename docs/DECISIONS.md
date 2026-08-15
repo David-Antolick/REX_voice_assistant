@@ -18,6 +18,81 @@ Format:
 
 ---
 
+## 2026-08-15 — Generic phrases mean the machine: `system_audio` takes "volume up", "mute", "play"
+
+**Context:** Of 44 registered actions, 43 touched music playback. "volume
+up" changed YouTube Music's volume, not the PC's, so REX was only useful
+while a music app was the thing making noise. Phase 1 adds a `system_audio`
+backend, and that breaks the guarantee the old phrasing relied on: `ytmd`
+and `spotify` could both declare `"volume up"` only because the `music`
+slot makes them mutually exclusive. `system_audio` is `slot=None`, so it is
+active alongside the music backend — both would match `"volume up"` and the
+winner would be decided by module import order in
+`rex_main/actions/__init__.py`. Incidental, silent, untested.
+
+**Decision:** Generic phrases belong to `system_audio`. App-specific
+control requires naming the app.
+
+| Phrase | Before | After |
+|---|---|---|
+| "volume up" / "volume 40" / "mute" | YTMD/Spotify app volume | **System volume** |
+| "music volume up" / "set music volume to 75" | — | YTMD/Spotify app volume |
+| "play" / "pause" / "next" / "previous" / "stop" | YTMD/Spotify only | **Media key — whatever is playing** |
+| "play music" / "pause music" / "next song" | "play music" only | YTMD/Spotify explicitly |
+
+Transport goes through `VK_MEDIA_*` rather than the audio endpoint,
+because that is what makes the inversion worth doing: media keys reach
+browsers, VLC, Netflix and calls, where the music backends' HTTP/OAuth
+APIs cannot. Volume and mute go through `IAudioEndpointVolume`, bound
+with raw `ctypes` COM — absolute "volume 40" is the one thing the volume
+keys cannot express.
+
+Bare "restart" was re-phrased to "restart song" in the same pass. It is a
+generic word whose plain meaning is rebooting the machine — which REX
+refuses to do by voice — so leaving it bound to track-restart was the same
+mistake in miniature.
+
+**Alternatives considered:**
+
+- **Leave the music backends owning the generics, and give `system_audio`
+  prefixed phrases ("system volume up").** Rejected on the merits: you
+  usually want the whole machine quieter, and the prefix falls on the
+  common case rather than the rare one. It also contradicts the existing
+  "phrase-based disambiguation, not prefix-based" decision.
+- **Give `system_audio` a slot so it is mutually exclusive with music.**
+  Slots arbitrate between *interchangeable* backends. There is only one
+  Windows audio endpoint, and system volume is not an alternative to
+  app volume — you want both, addressable separately.
+- **Order the registry so the intended winner is first.** That is the bug,
+  written down as a feature.
+- **Take `pycaw` for the Core Audio access.** A small single-maintainer
+  wrapper over six vtable slots, against a supply-chain rule that says
+  a dependency must justify itself. `rex_main/ui/hud.py` already sets the
+  precedent for hand-binding a Windows API with `ctypes`.
+
+**Consequences:**
+
+- Phase 1 was not purely additive. `ytmd.py` and `spotify.py` were
+  re-phrased in the **same** PR as `system_audio.py` — split across two
+  commits, `test_no_phrase_collision_between_concurrently_active_backends`
+  goes red on the intermediate one.
+- "restart" and (under YTMD) "next track \<song\>" are now unmatched
+  phrases. Unmatched is the safe failure: the HUD says "didn't catch that".
+- Future slotless backends inherit the rule. `system_window` (stream B)
+  and generalized app control (stream C) must claim phrases through
+  [PHASE1_STREAMS.md](PHASE1_STREAMS.md)'s collision table, not by
+  import order.
+- The collision tripwire now has something real to guard. It was added in
+  Phase 0 for exactly this wave.
+
+**See also:** [PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md) ("the decision to
+lock in first"); [PHASE1_STREAMS.md](PHASE1_STREAMS.md) (stream A);
+[ACTIONS.md](ACTIONS.md) (`system_audio` inventory);
+`rex_main/actions/system_audio.py`;
+`docs/specifics/spike_system_volume.py` (the verified binding).
+
+---
+
 ## 2026-08-15 — Keep the web dashboard, as an ambient readout (supersedes "the web dashboard idea is dead")
 
 **Context:** [UI_PLAN.md](UI_PLAN.md) states "The web dashboard idea is

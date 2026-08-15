@@ -24,6 +24,7 @@ from rex_main.actions.registry import (
 from rex_main.actions import apps  # noqa: F401
 from rex_main.actions import spotify  # noqa: F401
 from rex_main.actions import steelseries  # noqa: F401
+from rex_main.actions import system_audio  # noqa: F401
 from rex_main.actions import ytmd  # noqa: F401
 from rex_main.actions import ytvd  # noqa: F401
 from rex_main.actions import service  # noqa: F401  # imports ytmd + spotify modules
