@@ -18,6 +18,72 @@ Format:
 
 ---
 
+## 2026-08-15 — App control: fuzzy-match a cached catalog, `AttachThreadInput` for focus, `WM_CLOSE` for close
+
+**Context:** PC_CONTROL_PLAN Phase 2 generalizes `actions/apps.py` from a
+two-entry hardcoded dict to any installed app. Three things had to be
+settled before writing it: how a spoken name becomes an app, whether
+"switch to X" can work at all from a tray process, and what "close X"
+should do once it can name anything rather than only Spotify and YTMD.
+
+**Decision:**
+
+1. **Enumerate `Get-StartApps` once at startup, fuzzy-match against it.**
+   `apps.warm()` builds the catalog on a daemon thread from
+   `configure_from_config`; matching is `difflib.SequenceMatcher` over
+   punctuation-stripped names with a 0.72 floor, plus exact / prefix /
+   whole-word fast paths. Below the floor the command reports no match
+   and does nothing.
+2. **Focus ships, using `AttachThreadInput`.** Windows refuses
+   `SetForegroundWindow` from a process that isn't the foreground one,
+   which REX never is. Spiked on the dev machine from a detached
+   background process, foreground parked on an unrelated app, 12 s with
+   no user input, `ForegroundLockTimeout` = `INT_MAX`: the plain call
+   succeeded **2/5** (only when the launching terminal still had
+   foreground); plain-then-attach succeeded **5/5**. `_raise_window`
+   tries plain first, falls back to attaching our input queue to both
+   the outgoing-foreground and target threads, and verifies against
+   `GetForegroundWindow` so a refusal is logged rather than silent.
+3. **`close X` sends `WM_CLOSE`, not `taskkill /F /T`.** PC_CONTROL_PLAN
+   scoped the force-kill to named apps "where it's unambiguous" — that
+   was true of two music apps and stops being true the moment the name
+   can be any installed app. A misheard app name that force-kills an
+   editor costs unsaved work; a close *request* costs a dialog.
+
+**Alternatives considered:**
+
+- *A phonetic algorithm (Soundex / Metaphone) instead of edit distance.*
+  Rejected: Whisper's errors are orthographic, not phonetic — it emits
+  plausible English spellings ("blunder", "discored"), which edit
+  distance handles directly. Soundex would also collapse genuinely
+  distinct app names.
+- *A greedy `open (.+)` pattern.* Rejected per "Phrase-based
+  disambiguation, not prefix-based" — it swallows `close window`,
+  `go to home` and `switch to spotify`, with the winner decided by
+  import order in `actions/__init__.py`. The capture is length-bounded
+  and guarded by negative lookaheads for phrases other backends own.
+- *Building the catalog into the regex as an alternation.* Rejected:
+  `ActionSpec.patterns` is frozen at decoration time and the registry
+  has no re-declare API, so the catalog can only participate at
+  resolution time — which is where the fuzziness has to live anyway.
+- *Keeping the four hardcoded `apps_*` actions alongside the general
+  form.* Rejected: they would collide with it inside one backend. Their
+  exe paths survive as a seeded overlay in the catalog instead, which
+  matters because neither Spotify nor YouTube Music appears in
+  `Get-StartApps`.
+
+**Consequences:** Catalog build measured 0.45 s / 107 entries on the dev
+machine, off the dispatch path. "switch to spotify" and "switch to
+youtube music" stay with the `rex` backend's music switching; "focus
+spotify" is the phrase for raising its window. Close is now
+per-window rather than per-process, so a misfire is recoverable.
+
+**See also:** [ACTIONS.md](ACTIONS.md#apps--application-launch--focus--close-slot-none-transport-os_native),
+[PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md) open question 2,
+[rex_main/actions/apps.py](../rex_main/actions/apps.py).
+
+---
+
 ## 2026-08-15 — Keep the web dashboard, as an ambient readout (supersedes "the web dashboard idea is dead")
 
 **Context:** [UI_PLAN.md](UI_PLAN.md) states "The web dashboard idea is

@@ -224,20 +224,40 @@ autoclipping enabled in GG → Settings → Moments → Apps.
 | `switch_to_spotify` | `switch_music_backend` | "switch to spotify" | — | `active_music_backend` |
 | `switch_to_ytmd` | `switch_music_backend` | "switch to youtube music" | — | `active_music_backend` |
 
-### `apps` — Application launch / close (slot: `None`, transport: `os_native`)
+### `apps` — Application launch / focus / close (slot: `None`, transport: `os_native`)
 
 | Action | Capability | Phrases | Args | Side effects |
 |---|---|---|---|---|
-| `apps_open_youtube_music` | `open_app` | "open / launch / start youtube music" | — | `ytmd_process_running` |
-| `apps_close_youtube_music` | `close_app` | "close / quit / exit / kill youtube music" | — | `ytmd_process_running` |
-| `apps_open_spotify` | `open_app` | "open / launch / start spotify" | — | `spotify_process_running` |
-| `apps_close_spotify` | `close_app` | "close / quit / exit / kill spotify" | — | `spotify_process_running` |
+| `apps_open_app` | `open_app` | "open / launch / start X" | `name:str` | `app_process_running` |
+| `apps_focus_app` | `focus_app` | "switch to X", "go to X", "focus X" | `name:str` | `foreground_window` |
+| `apps_close_app` | `close_app` | "close / quit / exit / kill X" | `name:str` | `app_process_running` |
 
-Launch resolves the first existing path from a small candidate list per
-app (LocalAppData → Program Files → Microsoft Store WindowsApps). Close
-shells out to `taskkill /F` against the app's image name. If the app
-isn't installed in any known location, the open command logs a warning
-and does nothing.
+`X` is any installed app. The spoken name is fuzzy-matched
+(`difflib`, threshold 0.72) against Windows' own `Get-StartApps`
+catalog, enumerated once per session by `apps.warm()` and cached —
+Whisper returns "discored" for "discord" often enough that exact
+matching feels broken. Help files, release notes, uninstallers and
+vendor web links are filtered out of the catalog. Below the threshold
+the command logs "no installed app matches" and does nothing.
+
+Launch is layered: hardcoded exe paths → Start-menu `.lnk` target →
+the catalog's AppUserModelID via `shell:AppsFolder\<AppID>` (which also
+covers Store apps and `steam://` entries). YouTube Music and Spotify
+keep hardcoded paths because neither registers with `Get-StartApps`.
+The resolved handle is cached per app for the session.
+
+Focus and close enumerate visible top-level windows live, since both
+need a window that exists right now. **Close sends `WM_CLOSE`, not
+`taskkill /F`** — generalizing beyond two known music apps means
+"close X" can land on an editor holding unsaved work, so the app must
+get its chance to prompt.
+
+Phrases other backends own are excluded by negative lookahead rather
+than left to import order: `window` / `desktop` (`system_window`),
+`home` / `subscriptions` / `library` after "go to" (`ytvd`), and
+`spotify` / `youtube music` after "switch to" (the `rex` backend's
+music-backend switching). Use "focus spotify" to raise the Spotify
+window.
 
 ---
 

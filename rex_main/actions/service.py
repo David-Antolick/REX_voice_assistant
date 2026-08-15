@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 
+from rex_main.actions import apps as _apps_module
 from rex_main.actions import ytmd as _ytmd_module
 from rex_main.actions import spotify as _spotify_module
 from rex_main.actions.registry import action, set_active_backend, set_active_backends
@@ -30,6 +31,10 @@ def configure_from_config(config: dict) -> None:
     secrets = get_secrets(config)
     services = config.get("services", {}) or {}
     active = (services.get("active") or "none").lower()
+
+    # Slotless, config-independent, and slow enough (a PowerShell round-trip)
+    # that it must not land on the user's first "open X".
+    _apps_module.warm()
 
     if active == "ytmd":
         ytmd_cfg = services.get("ytmd", {}) or {}
