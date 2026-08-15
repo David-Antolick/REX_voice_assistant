@@ -67,6 +67,19 @@ dev = [
     "pip-audit>=2.7,<3",
 ]
 
+[tool.ruff.lint]
+# Pin the rule set explicitly. CI used to run bare `ruff check --ignore
+# E501,F401`, which meant the enforced rules were whatever that ruff
+# release happened to default to — so a new ruff turned a green build red
+# without a line of REX changing. These four are ruff's historical
+# defaults (pycodestyle errors + pyflakes), i.e. what CI was already
+# enforcing, now stated rather than inherited.
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E501",  # line length — not enforced in this codebase
+    "F401",  # unused imports — actions/__init__.py imports for @action side effects
+]
+
 [project.scripts]
 rex = "rex_main.cli:main"
 

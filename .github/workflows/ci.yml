@@ -75,10 +75,12 @@ jobs:
       - name: Install linters
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install "ruff>=0.15,<0.17"
 
       - name: Run ruff check
-        run: ruff check rex_main/ --ignore E501,F401
+        # Rule selection lives in pyproject.toml [tool.ruff.lint], so this
+        # can't drift with the ruff release the runner happens to install.
+        run: ruff check rex_main/
 
   audit:
     runs-on: windows-latest
