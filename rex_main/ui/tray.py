@@ -18,6 +18,7 @@ from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
 from rex_main.ui.bridge import UiBridge
+from rex_main.ui.discovery import CommandsDialog
 from rex_main.ui.icons import make_icon
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,12 @@ class RexTray(QObject):
         self._menu.addAction(self._action_pause)
         self._menu.addSeparator()
 
+        self._commands_dialog: Optional[CommandsDialog] = None
+        action_commands = QAction("What can I say?…", self._menu)
+        action_commands.setToolTip("Every command Rex understands, generated from the action registry.")
+        action_commands.triggered.connect(self._show_commands)
+        self._menu.addAction(action_commands)
+
         action_settings = QAction("Settings…", self._menu)
         action_settings.triggered.connect(self._on_open_settings)
         self._menu.addAction(action_settings)
@@ -248,6 +255,16 @@ class RexTray(QObject):
                 f"Could not {'create' if checked else 'remove'} the Startup shortcut:\n\n{exc}",
             )
             self._refresh_startup_check()
+
+    def _show_commands(self) -> None:
+        # Modeless so it can stay open as a cheat sheet while Rex listens, and
+        # kept alive on self so Python doesn't collect it out from under Qt.
+        if self._commands_dialog is None:
+            self._commands_dialog = CommandsDialog()
+        self._commands_dialog.refresh()
+        self._commands_dialog.show()
+        self._commands_dialog.raise_()
+        self._commands_dialog.activateWindow()
 
     def _open_logs(self) -> None:
         log_path_str = self._config.get("logging", {}).get("file", "~/.rex/logs/rex.log")
