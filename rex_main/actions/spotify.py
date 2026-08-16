@@ -260,6 +260,8 @@ def stop_music() -> None:
     preconditions=_PRECONDS,
     side_effects=("current_track",),
     examples=("next song", "skip song", "next track"),
+    # "next track" is a prefix of spotify_queue_track's "next track <song>".
+    no_early_match=True,
 )
 def next_track() -> None:
     _get().next_track()

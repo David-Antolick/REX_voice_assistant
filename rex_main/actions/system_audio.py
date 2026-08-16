@@ -317,7 +317,7 @@ def volume_down() -> None:
     slot=None,
     transport=_TRANSPORT,
     summary="Set the system volume to a specific 0–100 level.",
-    patterns=[rf"^{_W}(?:set\s+)?volume\s+(?:to\s+)?(\d{{1,3}})(?:\s+percent)?{_END}"],
+    patterns=[rf"^{_W}(?:set\s+)?volume\s+(?:to\s+)?(\d{{1,3}})(?:\s*(?:percent|%))?{_END}"],
     args=(ArgSpec("level", "int", "Target volume 0–100 (clamped)."),),
     preconditions=_PRECONDS,
     side_effects=("system_volume",),
@@ -371,6 +371,11 @@ def unmute() -> None:
     preconditions=_PRECONDS,
     side_effects=("playback_state",),
     examples=("play", "pause", "play pause", "resume"),
+    # Bare transport words are prefixes of music-backend phrases ("pause
+    # music", "resume music"). FastVAD dispatches partial transcripts, so
+    # without this the media key fires mid-utterance and the intended
+    # command's audio is dropped.
+    no_early_match=True,
 )
 def play_pause() -> None:
     _get().play_pause()
@@ -387,6 +392,7 @@ def play_pause() -> None:
     preconditions=_PRECONDS,
     side_effects=("current_track",),
     examples=("next", "skip"),
+    no_early_match=True,  # prefix of "next song" / "skip song" / "skip ahead N"
 )
 def next_track() -> None:
     _get().next_track()
@@ -403,6 +409,7 @@ def next_track() -> None:
     preconditions=_PRECONDS,
     side_effects=("current_track",),
     examples=("previous", "last"),
+    no_early_match=True,  # prefix of "previous song" / "last song"
 )
 def previous_track() -> None:
     _get().previous_track()
@@ -419,6 +426,7 @@ def previous_track() -> None:
     preconditions=_PRECONDS,
     side_effects=("playback_state",),
     examples=("stop",),
+    no_early_match=True,  # prefix of "stop music"
 )
 def stop() -> None:
     _get().stop()

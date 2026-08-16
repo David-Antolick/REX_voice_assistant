@@ -286,6 +286,14 @@ the music backends' HTTP/OAuth APIs cannot.
 Adding a musical noun scopes a transport phrase back to the music
 backend: "next" is the media key, "next song" is YTMD/Spotify.
 
+The transport actions all set `no_early_match=True`: their bare phrases
+are word-prefixes of longer active commands ("pause" / "pause music",
+"skip" / "skip ahead 30"), so matching a partial transcript would fire
+the media key mid-utterance and swallow the longer command. They wait
+for the full utterance instead — the same tradeoff the music volume
+actions already make. `test_no_early_match_hijack_of_longer_phrases`
+in `test_actions.py` enforces this for every future backend.
+
 ---
 
 ## Adding a new backend (the `discord` / `steam` / `windows_audio` recipe)

@@ -139,6 +139,49 @@ def test_no_phrase_collision_between_concurrently_active_backends(music_backend)
         actions.set_active_backend("music", "ytmd")
 
 
+def _word_prefixes(phrase: str) -> list[str]:
+    words = phrase.split()
+    return [" ".join(words[:i]) for i in range(1, len(words))]
+
+
+@pytest.mark.parametrize("music_backend", ["ytmd", "spotify"])
+def test_no_early_match_hijack_of_longer_phrases(music_backend):
+    """A partial transcript must never execute a *different* action.
+
+    FastVAD re-transcribes every ~200ms and dispatches each partial with
+    ``early=True`` (see matcher.dispatch_text). An action that matches a
+    strict word-prefix of a longer active phrase — e.g. bare "pause"
+    matching while the user is still saying "pause music" — fires
+    mid-utterance and the intended command's audio is dropped. Any action
+    whose phrases are prefixes of other active phrases must therefore
+    declare ``no_early_match=True``, which defers it to the final pass.
+
+    The full-phrase collision test above cannot see this: the phrases are
+    disjoint as complete utterances.
+    """
+    actions.set_active_backend("music", music_backend)
+    try:
+        active = actions.active_specs()
+        failures: list[str] = []
+        for spec in active:
+            for ex in spec.examples:
+                for prefix in _word_prefixes(ex):
+                    for other in active:
+                        if other.name == spec.name or other.no_early_match:
+                            continue
+                        if any(re.compile(p, re.I).match(prefix) for p in other.patterns):
+                            failures.append(
+                                f"  partial {prefix!r} (of {spec.name}'s {ex!r}) "
+                                f"early-executes {other.name}"
+                            )
+        assert not failures, (
+            f"Early-match hijacks with music={music_backend} — these actions "
+            f"need no_early_match=True:\n" + "\n".join(failures)
+        )
+    finally:
+        actions.set_active_backend("music", "ytmd")
+
+
 # Slot routing
 
 def test_active_specs_filter_by_slot():
