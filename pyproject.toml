@@ -51,7 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cuda = ["nvidia-cudnn-cu12==9.5.1.17"]
-benchmark = ["psutil>=6.0,<8", "nvidia-ml-py>=12.535,<13"]
+benchmark = ["psutil>=6.0,<8", "nvidia-ml-py>=12.535,<14"]
 wake_word = ["rex-voice-assistant"]   # Backward-compat alias; openwakeword is now in base deps.
 integrations = [
     "pypresence>=4.3,<5",
