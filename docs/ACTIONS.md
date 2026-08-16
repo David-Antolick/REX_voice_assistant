@@ -105,11 +105,12 @@ by config or by `switch_to_*` voice commands).
 |---|---|---|
 | `music` | Audio playback / queue / library | `ytmd`, `spotify` |
 | *(future)* `voice_chat` | Voice mute/deafen for Spacebar/Fermi (planned) | `spacebar` |
-| *(future)* `system_audio` | Per-app and system volume | `windows_audio` |
 | *(future)* `game_platform` | Launching games / library queries | `steam` |
 | *(future)* `clipping` | Currently always-on (one backend) | `steelseries` |
 
-If your action has no competing alternative, set `slot=None`.
+If your action has no competing alternative, set `slot=None`. There is no
+`system_audio` slot: slots arbitrate between interchangeable backends, and
+there is only one Windows audio endpoint.
 
 ### Avoiding phrase collisions across slots
 
@@ -134,20 +135,24 @@ Phrases column shows the user-facing utterance, not the regex.
 
 | Action | Capability | Phrases | Args | Side effects |
 |---|---|---|---|---|
-| `ytmd_play_music` | `play_music` | "play music" | — | `playback_state` |
-| `ytmd_stop_music` | `stop_music` | "stop music" | — | `playback_state` |
-| `ytmd_next_track` | `next_track` | "next", "skip" | — | `current_track` |
-| `ytmd_previous_track` | `previous_track` | "last", "previous" | — | `current_track` |
-| `ytmd_restart_track` | `restart_track` | "restart" | — | `track_position` |
+| `ytmd_play_music` | `play_music` | "play music", "resume music" | — | `playback_state` |
+| `ytmd_stop_music` | `stop_music` | "stop music", "pause music" | — | `playback_state` |
+| `ytmd_next_track` | `next_track` | "next song", "skip song", "next track" | — | `current_track` |
+| `ytmd_previous_track` | `previous_track` | "last song", "previous song", "previous track" | — | `current_track` |
+| `ytmd_restart_track` | `restart_track` | "restart song", "restart track" | — | `track_position` |
 | `ytmd_search_song` | `search_song` | "search X", "search X by Y" | `title:str`, `artist:str?` | `playback_state`, `current_track` |
-| `ytmd_volume_up` | `volume_up` | "volume up" | — | `volume` |
-| `ytmd_volume_down` | `volume_down` | "volume down" | — | `volume` |
-| `ytmd_set_volume` | `set_volume` | "volume 50" | `level:int` | `volume` |
+| `ytmd_volume_up` | `volume_up` | "music volume up" | — | `volume` |
+| `ytmd_volume_down` | `volume_down` | "music volume down" | — | `volume` |
+| `ytmd_set_volume` | `set_volume` | "music volume 50", "set music volume to 75" | `level:int` | `volume` |
 | `ytmd_like` | `like` | "like" | — | `track_rating` |
 | `ytmd_dislike` | `dislike` | "dislike" | — | `track_rating` |
 | `ytmd_so_sad` | `so_sad` | "this is so sad" | — | `playback_state`, `current_track` |
 
 Preconditions for all: YTMD desktop app running with Companion-Server enabled.
+
+Music phrases name the app on purpose — the bare generics ("volume up",
+"pause", "next") belong to `system_audio`. See the phrase-ownership entry
+in [DECISIONS.md](DECISIONS.md).
 
 ### `ytvd` — YouTube Video + Music Desktop fork (slot: `None`, transport: `http_local`)
 
@@ -188,15 +193,15 @@ list.
 
 | Action | Capability | Phrases | Args | Side effects |
 |---|---|---|---|---|
-| `spotify_play_music` | `play_music` | "play music" | — | `playback_state` |
-| `spotify_stop_music` | `stop_music` | "stop music" | — | `playback_state` |
-| `spotify_next_track` | `next_track` | "next", "skip" | — | `current_track` |
-| `spotify_previous_track` | `previous_track` | "last", "previous" | — | `current_track` |
-| `spotify_restart_track` | `restart_track` | "restart" | — | `track_position` |
+| `spotify_play_music` | `play_music` | "play music", "resume music" | — | `playback_state` |
+| `spotify_stop_music` | `stop_music` | "stop music", "pause music" | — | `playback_state` |
+| `spotify_next_track` | `next_track` | "next song", "skip song", "next track" | — | `current_track` |
+| `spotify_previous_track` | `previous_track` | "last song", "previous song", "previous track" | — | `current_track` |
+| `spotify_restart_track` | `restart_track` | "restart song", "restart track" | — | `track_position` |
 | `spotify_search_song` | `search_song` | "search X", "search X by Y" | `title:str`, `artist:str?` | `playback_state`, `current_track` |
-| `spotify_volume_up` | `volume_up` | "volume up" | — | `volume` |
-| `spotify_volume_down` | `volume_down` | "volume down" | — | `volume` |
-| `spotify_set_volume` | `set_volume` | "volume 50" | `level:int` | `volume` |
+| `spotify_volume_up` | `volume_up` | "music volume up" | — | `volume` |
+| `spotify_volume_down` | `volume_down` | "music volume down" | — | `volume` |
+| `spotify_set_volume` | `set_volume` | "music volume 50", "set music volume to 75" | `level:int` | `volume` |
 | `spotify_like` | `like` | "like" | — | `library` |
 | `spotify_dislike` | `dislike` | "dislike" | — | `library` |
 | `spotify_shuffle_on` | `shuffle_on` | "shuffle on" | — | `shuffle_state` |
@@ -207,6 +212,10 @@ list.
 | `spotify_so_sad` | `so_sad` | "this is so sad" | — | `playback_state`, `current_track` |
 
 Preconditions for all: Spotify Connect device available; OAuth credentials configured.
+
+Music phrases name the app on purpose — the bare generics ("volume up",
+"pause", "next") belong to `system_audio`. See the phrase-ownership entry
+in [DECISIONS.md](DECISIONS.md).
 
 ### `steelseries` — SteelSeries GG Moments (slot: `None`, transport: `gamesense`)
 
@@ -238,6 +247,52 @@ app (LocalAppData → Program Files → Microsoft Store WindowsApps). Close
 shells out to `taskkill /F` against the app's image name. If the app
 isn't installed in any known location, the open command logs a warning
 and does nothing.
+
+### `system_audio` — Windows system volume + media keys (slot: `None`, transport: `os_native`)
+
+Owns the **generic** audio phrases. Saying "volume up" means the machine,
+not whichever music app happens to be running — see the phrase-ownership
+entry in [DECISIONS.md](DECISIONS.md). Always-on (`slot=None`): there is
+only one Windows audio endpoint, so there is nothing to arbitrate.
+
+| Action | Capability | Phrases | Args | Side effects |
+|---|---|---|---|---|
+| `system_audio_volume_up` | `volume_up` | "volume up", "louder", "turn it up" | — | `system_volume` |
+| `system_audio_volume_down` | `volume_down` | "volume down", "quieter", "turn it down" | — | `system_volume` |
+| `system_audio_set_volume` | `set_volume` | "volume 40", "set volume to 40", "volume 75 percent" | `level:int` | `system_volume` |
+| `system_audio_mute` | `mute` | "mute", "mute audio", "mute the sound" | — | `system_mute` |
+| `system_audio_unmute` | `unmute` | "unmute", "unmute audio", "unmute the sound" | — | `system_mute` |
+| `system_audio_play_pause` | `play_pause` | "play", "pause", "play pause", "resume" | — | `playback_state` |
+| `system_audio_next_track` | `next_track` | "next", "skip" | — | `current_track` |
+| `system_audio_previous_track` | `previous_track` | "previous", "last" | — | `current_track` |
+| `system_audio_stop` | `stop` | "stop" | — | `playback_state` |
+
+Preconditions for all: a default Windows audio output device is present.
+
+Volume and mute bind `IAudioEndpointVolume` on the default render
+endpoint with raw `ctypes` COM — six vtable slots, no `pycaw`
+dependency, matching how `rex_main/ui/hud.py` hand-binds `user32`.
+Volume up/down use `VolumeStepUp` / `VolumeStepDown` so a step matches
+the keyboard's volume key exactly. The endpoint pointer is re-acquired
+per command (~2 ms) rather than cached: it is bound to one device, so a
+cached pointer would silently keep controlling the old output after the
+user plugs in headphones.
+
+Transport (play/pause, next, previous, stop) deliberately uses the
+`VK_MEDIA_*` keys rather than the audio endpoint. That is the point of
+this backend: media keys reach browsers, VLC, Netflix and calls, where
+the music backends' HTTP/OAuth APIs cannot.
+
+Adding a musical noun scopes a transport phrase back to the music
+backend: "next" is the media key, "next song" is YTMD/Spotify.
+
+The transport actions all set `no_early_match=True`: their bare phrases
+are word-prefixes of longer active commands ("pause" / "pause music",
+"skip" / "skip ahead 30"), so matching a partial transcript would fire
+the media key mid-utterance and swallow the longer command. They wait
+for the full utterance instead — the same tradeoff the music volume
+actions already make. `test_no_early_match_hijack_of_longer_phrases`
+in `test_actions.py` enforces this for every future backend.
 
 ---
 

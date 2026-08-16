@@ -224,10 +224,10 @@ _PRECONDS = ("Spotify Connect device available", "OAuth credentials configured")
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Resume Spotify playback on the active Connect device.",
-    patterns=[rf"^{_W}play\s+music{_W}{_END}"],
+    patterns=[rf"^{_W}(?:play|resume)\s+music{_W}{_END}"],
     preconditions=_PRECONDS,
     side_effects=("playback_state",),
-    examples=("play music",),
+    examples=("play music", "resume music"),
 )
 def play_music() -> None:
     _get().play_music()
@@ -240,10 +240,10 @@ def play_music() -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Pause Spotify playback.",
-    patterns=[rf"^{_W}stop\s+music{_W}{_END}"],
+    patterns=[rf"^{_W}(?:stop|pause)\s+music{_W}{_END}"],
     preconditions=_PRECONDS,
     side_effects=("playback_state",),
-    examples=("stop music",),
+    examples=("stop music", "pause music"),
 )
 def stop_music() -> None:
     _get().stop_music()
@@ -256,10 +256,12 @@ def stop_music() -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Skip to the next track in the Spotify queue.",
-    patterns=[rf"^{_W}(?:next|skip){_W}{_END}"],
+    patterns=[rf"^{_W}(?:next|skip)\s+(?:song|track){_W}{_END}"],
     preconditions=_PRECONDS,
     side_effects=("current_track",),
-    examples=("next", "skip"),
+    examples=("next song", "skip song", "next track"),
+    # "next track" is a prefix of spotify_queue_track's "next track <song>".
+    no_early_match=True,
 )
 def next_track() -> None:
     _get().next_track()
@@ -272,10 +274,10 @@ def next_track() -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Go back to the previous Spotify track.",
-    patterns=[rf"^{_W}(?:last|previous){_W}{_END}"],
+    patterns=[rf"^{_W}(?:last|previous)\s+(?:song|track){_W}{_END}"],
     preconditions=_PRECONDS,
     side_effects=("current_track",),
-    examples=("last", "previous"),
+    examples=("last song", "previous song", "previous track"),
 )
 def previous_track() -> None:
     _get().previous_track()
@@ -288,10 +290,10 @@ def previous_track() -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Seek back to the start of the current Spotify track.",
-    patterns=[rf"^{_W}restart{_W}{_END}"],
+    patterns=[rf"^{_W}restart\s+(?:song|track){_W}{_END}"],
     preconditions=_PRECONDS,
     side_effects=("track_position",),
-    examples=("restart",),
+    examples=("restart song", "restart track"),
 )
 def restart_track() -> None:
     _get().restart_track()
@@ -325,10 +327,10 @@ def search_song(title: str, artist: str | None = None) -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Step Spotify volume up by 10%.",
-    patterns=[rf"^{_W}volume up{_END}"],
+    patterns=[rf"^{_W}music\s+volume\s+up{_END}"],
     preconditions=_PRECONDS,
     side_effects=("volume",),
-    examples=("volume up",),
+    examples=("music volume up",),
     no_early_match=True,
 )
 def volume_up() -> None:
@@ -342,10 +344,10 @@ def volume_up() -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Step Spotify volume down by 10%.",
-    patterns=[rf"^{_W}volume down{_END}"],
+    patterns=[rf"^{_W}music\s+volume\s+down{_END}"],
     preconditions=_PRECONDS,
     side_effects=("volume",),
-    examples=("volume down",),
+    examples=("music volume down",),
     no_early_match=True,
 )
 def volume_down() -> None:
@@ -359,11 +361,11 @@ def volume_down() -> None:
     slot=_SLOT,
     transport=_TRANSPORT,
     summary="Set Spotify volume to a specific 0–100 level.",
-    patterns=[rf"^{_W}volume\s+(\d{{1,3}}){_W}{_END}"],
+    patterns=[rf"^{_W}(?:set\s+)?music\s+volume\s+(?:to\s+)?(\d{{1,3}}){_W}{_END}"],
     args=(ArgSpec("level", "int", "Target volume 0–100 (clamped)."),),
     preconditions=_PRECONDS,
     side_effects=("volume",),
-    examples=("volume 50", "volume 75"),
+    examples=("music volume 50", "set music volume to 75"),
     no_early_match=True,
 )
 def set_volume(level: int | str) -> None:
