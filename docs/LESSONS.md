@@ -17,6 +17,83 @@ Format:
 
 ---
 
+## One phrase, two actions: under FastVAD, a phrase whose prefix is another action's *complete* phrase fires both
+
+**Symptom:** On an integration build carrying `system_audio` and
+`system_window` together, saying "next desktop" skipped the user's music
+*and then* switched virtual desktop. Two actions from one utterance. Every
+individual action was correct and every backend's tests were green.
+
+**Root cause:** FastVAD re-transcribes mid-utterance and dispatches each
+partial with `early=True`. The partial "next" is a complete match for the
+media backend's `next_track`, which is not `no_early_match`, so it
+executes immediately. The full utterance "next desktop" then matches
+`system_window_next_desktop` and executes too. Nothing is racing and
+nothing is misheard — the shorter action simply *is* a valid command, and
+it arrives first.
+
+**Fix:** Dropped the bare "next desktop" / "last desktop" / "previous
+desktop" phrasings. Virtual-desktop switching is "desktop left" /
+"desktop right" / "switch desktop left|right", none of which have a
+shorter prefix that matches anything. The alternative — marking the media
+backend's `next` / `previous` as `no_early_match` — was rejected: those
+are the hottest commands in the product and `no_early_match` costs them
+the full silence timeout, trading everyday latency for a rare command.
+
+**Lesson:** Two rules fall out of this.
+
+1. **When adding a multi-word phrase, check whether any prefix of it is
+   already a complete phrase on a concurrently active backend.** Not
+   whether the full phrases collide — the collision tests already cover
+   that — but whether a *prefix* does. Distinct phrasing is the answer,
+   per [DECISIONS.md](DECISIONS.md) "Phrase-based disambiguation, not
+   prefix-based"; `no_early_match` is the wrong lever when the shorter
+   phrase is the common one.
+2. **This class of bug is invisible to a single backend's tests.** It
+   needs two backends active at once *and* the FastVAD early-dispatch
+   path, so it only shows up on an integration build.
+   `test_no_phrase_collision_between_concurrently_active_backends`
+   compares whole examples against whole patterns and will not catch it.
+
+It also **pre-dates the PC-control wave**: `spotify_queue_track`'s "next
+track \<query\>" has exactly this shape against a bare "next", and has
+had it all along.
+
+**See also:** [rex_main/actions/system_window.py](../rex_main/actions/system_window.py),
+[rex_main/fast_vad.py](../rex_main/fast_vad.py),
+[PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md), [ACTIONS.md](ACTIONS.md).
+
+---
+
+## "Minimize" then "restore" restores the wrong window — minimizing gives the foreground away
+
+**Symptom:** Saying "minimize" then "restore" left the window minimized.
+Worse, `restore` wasn't a no-op — it ran `ShowWindow(SW_RESTORE)` against
+whatever app surfaced behind the minimized one.
+
+**Root cause:** Every window command resolved its target with
+`GetForegroundWindow()`. That is correct for minimize / maximize / close,
+but a minimized window is by definition no longer the foreground window,
+so the *next* command resolves to an unrelated app. Windows has no
+"restore the last minimized window" primitive to fall back on.
+
+**Fix:** `system_window` remembers the HWND it last minimized and prefers
+it for `restore`, guarded by `IsWindow` + `IsIconic` so a stale handle
+falls through. With nothing outstanding, `restore` keeps its other
+meaning: un-maximize the foreground window.
+
+**Lesson:** Voice commands arrive as a *sequence*, and each one changes
+the state the next one reads. Any command that acts on "the current X"
+needs checking against the command that plausibly precedes it — the
+failure is silent and lands on the wrong target, which is worse than an
+error. The same trap is waiting for anything that resolves a window by
+foreground (see the `switch to <app>` work in `apps.py`).
+
+**See also:** [rex_main/actions/system_window.py](../rex_main/actions/system_window.py),
+[PC_CONTROL_PLAN.md](PC_CONTROL_PLAN.md) safety rails.
+
+---
+
 ## Two code paths for the same job — and the default config ran the worse one
 
 **Symptom:** REX felt unresponsive in a way that didn't match the code.
