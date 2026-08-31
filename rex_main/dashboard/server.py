@@ -5,15 +5,21 @@ Provides:
 - Static file serving for dashboard UI
 - REST API for current stats
 - WebSocket for real-time updates
-"""
 
-from __future__ import annotations
+The socket carries two kinds of frame. Lifecycle events (``state.*``,
+``match``, ``no_match``) are pushed the moment they happen, via
+``events.event_hub``; resource meters ride a 1 s tick, which is all they
+need. See docs/DASHBOARD_PLAN.md.
+"""
 
 import asyncio
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Optional, Set
+
+from rex_main.dashboard.events import Subscription, event_hub
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +28,19 @@ _server_thread: Optional[threading.Thread] = None
 _should_stop = threading.Event()
 _websocket_clients: Set = set()
 
+METRICS_INTERVAL_S = 1.0
+
 
 def _get_app():
-    """Create and configure the FastAPI application."""
+    """Create and configure the FastAPI application.
+
+    fastapi is imported here, not at module scope, so `rex` without
+    --dashboard doesn't pay for it. That is also why this module must not
+    use `from __future__ import annotations`: FastAPI resolves endpoint
+    annotations against module globals, so a deferred `websocket:
+    WebSocket` never resolves and the route degrades into a query
+    parameter — /ws then rejects every connection with a 1008.
+    """
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
@@ -96,50 +112,18 @@ def _get_app():
             _websocket_clients.add(websocket)
             logger.debug("WebSocket client connected, total: %d", len(_websocket_clients))
 
+            # Subscribe before the snapshot, so an event landing between the
+            # two is queued rather than lost.
+            subscription = event_hub.subscribe()
             try:
-                # Import benchmark for resource stats
-                try:
-                    from rex_main.benchmark import benchmark
-                    has_benchmark = True
-                except ImportError:
-                    has_benchmark = False
-
-                while True:
-                    # Check stop signal
-                    if _should_stop.is_set():
-                        break
-
-                    # Send stats every second
-                    data = {
-                        "stats": metrics.get_session_stats(),
-                        "recent": metrics.get_recent_transcriptions(limit=10),
-                        "commands": metrics.get_command_frequency()[:10],
-                    }
-
-                    # Add benchmark/resource data
-                    if has_benchmark:
-                        try:
-                            system_stats = benchmark.get_system_stats()
-                            data["resources"] = {
-                                "cpu_percent": system_stats.cpu_percent,
-                                "memory_percent": system_stats.memory_percent,
-                                "gpu_available": system_stats.gpu_available,
-                                "gpu_name": system_stats.gpu_name,
-                                "gpu_percent": system_stats.gpu_percent,
-                                "gpu_memory_used_mb": system_stats.gpu_memory_used_mb,
-                                "gpu_memory_total_mb": system_stats.gpu_memory_total_mb,
-                                "gpu_temperature": system_stats.gpu_temperature,
-                            }
-                        except Exception:
-                            pass
-
-                    await websocket.send_json(data)
-                    await asyncio.sleep(1)
+                await websocket.send_json({"type": "snapshot", **event_hub.snapshot()})
+                await _push_loop(websocket, subscription)
             except WebSocketDisconnect:
                 logger.debug("WebSocket client disconnected normally")
             except Exception as e:
                 logger.debug("WebSocket error: %s", e)
             finally:
+                event_hub.unsubscribe(subscription)
                 _websocket_clients.discard(websocket)
                 logger.debug("WebSocket client disconnected, total: %d", len(_websocket_clients))
         except Exception as e:
@@ -151,6 +135,55 @@ def _get_app():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     return app
+
+
+def _metrics_frame() -> dict:
+    """The polled half of the feed: counters and resource meters."""
+    from rex_main.metrics import metrics
+
+    data = {
+        "type": "metrics",
+        "stats": metrics.get_session_stats(),
+        "recent": metrics.get_recent_transcriptions(limit=10),
+        "commands": metrics.get_command_frequency()[:10],
+    }
+
+    try:
+        from rex_main.benchmark import benchmark
+        system_stats = benchmark.get_system_stats()
+        data["resources"] = {
+            "cpu_percent": system_stats.cpu_percent,
+            "memory_percent": system_stats.memory_percent,
+            "gpu_available": system_stats.gpu_available,
+            "gpu_name": system_stats.gpu_name,
+            "gpu_percent": system_stats.gpu_percent,
+            "gpu_memory_used_mb": system_stats.gpu_memory_used_mb,
+            "gpu_memory_total_mb": system_stats.gpu_memory_total_mb,
+            "gpu_temperature": system_stats.gpu_temperature,
+        }
+    except Exception:
+        pass
+
+    return data
+
+
+async def _push_loop(websocket, subscription: Subscription) -> None:
+    """Multiplex live events and the metrics tick onto one socket.
+
+    One send site on purpose. Two tasks sending on the same WebSocket can
+    interleave frames, so the tick is expressed as a timeout on the event
+    wait rather than as a second task.
+    """
+    next_tick = 0.0  # first metrics frame goes out immediately
+    while not _should_stop.is_set():
+        timeout = max(0.0, next_tick - time.monotonic())
+        try:
+            record = await asyncio.wait_for(subscription.queue.get(), timeout)
+        except asyncio.TimeoutError:
+            await websocket.send_json(_metrics_frame())
+            next_tick = time.monotonic() + METRICS_INTERVAL_S
+        else:
+            await websocket.send_json(record)
 
 
 def _run_server(host: str, port: int):
