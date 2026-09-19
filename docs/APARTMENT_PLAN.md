@@ -57,6 +57,15 @@ changed mid-flight.
 6. **No LLM in the fast path.** Regex commands stay instant. A local
    model, if added, is a fallback for utterances the regex table
    rejects. It is a stretch goal, not on the Christmas path.
+7. **Heavy inference is a remote endpoint, not a hub job.** The
+   existing GPU box (currently serving GLM at 2–10 ms) hosts Whisper
+   `large-v3-turbo` behind an OpenAI-compatible transcription endpoint
+   (speaches / faster-whisper-server) and, later, the LLM planner. The
+   hub keeps wake word, VAD, Wyoming, SmartRent, and the phone API
+   local, sends only post-wake utterances to the endpoint, and falls
+   back to CPU `small.en` if the endpoint is unreachable. SmartRent is
+   cloud anyway, so a remote endpoint costs no resilience the apartment
+   half ever had. The hub therefore needs no GPU.
 
 ## The sequence
 
@@ -142,6 +151,11 @@ The split. The hub is the same package with a different entry point.
   - `GET /v1/actions` → the active registry (feeds the phone UI's
     "what can I say" the same way `ui/discovery.py` feeds the tray).
 - `rex hub` CLI command; `--host`, `--port`, `--model`.
+- `Transcriber` protocol with two implementations: `LocalWhisper`
+  (wraps `WhisperWorker._transcribe`) and `RemoteWhisper` (POSTs wav to
+  the endpoint's `/v1/audio/transcriptions`, bearer token, 3 s
+  timeout). Hub prefers remote, falls back to local on error, and
+  logs which one answered. The PC keeps `LocalWhisper` only.
 - **Linux headless port.** This is the unknown-cost item. Known work:
   `whisper_worker._setup_cuda_paths` is Windows-shaped; `rex.py`
   imports must not drag in PySide6; `keyring` on headless Linux needs
@@ -214,14 +228,70 @@ This is the Christmas demo even if 4 slips: lock the door from bed.
   one with the date.
 - Text to speech.
 
-## Hardware list
+## Hardware
 
-| Item | For | When |
+Sized cautiously: bigger model than needed, headroom on the hub.
+
+### Where things run
+
+| Workload | Runs on | Why |
 |---|---|---|
-| Server (already planned) | hub | week 1 |
-| NVIDIA card for it, optional | Whisper latency | after measuring CPU in week 1 |
-| 1× Voice PE or Atom Echo | milestone 4 | order week 1 |
-| 1–2× more satellites | milestone 5 | order week 8 |
+| Wake word (`hey_rex`, openWakeWord), VAD | hub | cheap on CPU, must be local so only post-wake audio leaves the apartment |
+| Wyoming server, SmartRent socket, phone API | hub | always-on, on the LAN the satellites can reach |
+| Whisper `large-v3-turbo` (fp16, ~1.6 GB VRAM) | GPU box | Whisper pads every clip to 30 s, so a short command costs the same as a long one: ~150–300 ms on any RTX, 1.5–3 s on a good CPU. Large models belong on the GPU |
+| Whisper `small.en` int8 | hub, fallback only | what the PC runs today; ~0.5–1 s on an 8-core CPU |
+| LLM planner (stretch) | GPU box | already there, OpenAI-compatible API |
+
+### Hub (apartment, always-on)
+
+| Pick | Spec | Rough cost |
+|---|---|---|
+| **Recommended** | Ryzen 7 7840HS / 8845HS-class mini PC, 8 cores, 32 GB (64 GB if it also does ZFS backup duty), 1 TB NVMe + backup drives | $500–700 |
+| Minimum | Intel N100 mini PC, 16 GB | $150–200; fine for wake/VAD for 4 satellites, but the CPU Whisper fallback is `base.en` at best |
+| If you want inference in-apartment anyway | small tower + used RTX 3060 12 GB or 4060 Ti 16 GB | +$200–400; not needed while the GPU box exists |
+
+Wake word plus VAD for one satellite stream is a few percent of one
+core. Four satellites is nothing. The Ryzen pick is about fallback
+headroom and the backup role, not the voice work.
+
+### GPU box (already exists)
+
+Add a Whisper endpoint next to GLM. `large-v3-turbo` fp16 is ~1.6 GB
+VRAM; full `large-v3` is ~3 GB and is the "bigger than needed" option
+if VRAM is free, though turbo is within noise of it on English
+commands. Either is invisible next to a GLM deployment.
+
+### Satellites (mics)
+
+| Pick | What you get | Cost |
+|---|---|---|
+| **Home Assistant Voice Preview Edition** | ESP32-S3 + XMOS XU316 DSP: echo cancellation, noise suppression, dual far-field mics, on-device wake word (microWakeWord), speaker + 3.5 mm out, hardware mute, cased. Wyoming/ESPHome native | $59–69 each |
+| ReSpeaker Lite kit (XIAO ESP32-S3) | Same XMOS chip, 2 mics, ~3 m far-field, small speaker, acrylic case; needs ESPHome flashing | ~$34 each |
+| Atom Echo | single mic, poor far-field; bedside/desk only | ~$13 |
+
+Recommendation: Voice PE, one per room you actually talk in. For a
+typical apartment that is living room, bedroom, and kitchen if it is
+its own room; the office/gaming room already has the PC. Order one
+now, two more at milestone 5.
+
+Wake word placement: the `hey_rex` model is openWakeWord format and
+runs on the hub, so satellites stream continuously (16 kHz mono, ~256
+kbps each, trivial on LAN). Voice PE's on-device models ("okay nabu",
+"hey jarvis") are a fallback if hub-side detection misbehaves; a
+custom microWakeWord for "hey rex" is a separate training pipeline
+and is not on the Christmas path.
+
+### Budget
+
+| Item | Qty | Cost |
+|---|---|---|
+| Hub mini PC (Ryzen, 32 GB) | 1 | $500–700 |
+| Voice PE satellites | 3 | ~$180–210 |
+| GPU box Whisper endpoint | 0 | already owned |
+| **Total** | | **~$700–900** |
+
+The N100 hub and ReSpeaker Lite path lands the same system for about
+$300, with less fallback and more flashing.
 
 ## The one question that reorders everything
 
